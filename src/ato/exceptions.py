@@ -15,3 +15,7 @@ class LLMError(AtoError):
 
 class MemoryStoreError(AtoError):
     """Raised when persistent memory cannot be read, written, or cleared."""
+
+
+class ToolError(AtoError):
+    """Raised when a tool request is invalid, unauthorized, or fails safely."""

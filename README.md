@@ -6,20 +6,23 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 2 build provides:
+The current Phase 3 build provides:
 
 - An interactive terminal conversation
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
+- An allowlisted tool registry with validated arguments
+- Read-only tools for listing files, reading small text files, and checking Git status
+- Workspace path boundaries and a maximum tool-call limit
 - A provider-neutral `LLMClient` interface
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Environment-based configuration with no hard-coded secrets
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-Semantic memory retrieval, tools, autonomous workflows, voice, GUI, and
+File writes, code execution, web research, autonomous workflows, voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -34,6 +37,7 @@ ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
 |   |-- memory/         # Validated, atomic JSON persistence
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
+|   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
 |   |-- ui/             # Terminal and future user interfaces
 |   |-- config.py       # Environment configuration
 |   |-- exceptions.py   # Application-specific errors
@@ -88,6 +92,7 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ATO_MODEL=deepseek-v4-flash
 ATO_MEMORY_FILE=data/memory.json
 ATO_MEMORY_MAX_MESSAGES=40
+ATO_WORKSPACE_ROOT=.
 ```
 
 Never commit `.env`; it is excluded by `.gitignore`.
@@ -123,4 +128,17 @@ Terminal UI -> Agent Core -> LLMClient -> DeepSeek Chat API
 translates Ato messages to the provider API, allowing future providers or interfaces
 to be added without rewriting the Agent Core. `JsonMemoryStore` persists only user
 and assistant messages; the system prompt and API credentials are never written to
-the memory file.
+the memory file. `ToolRegistry` exposes only explicitly registered operations, and
+all file paths must remain inside `ATO_WORKSPACE_ROOT`.
+
+## Phase 3 tool safety
+
+The initial tools are deliberately read-only:
+
+- `list_files` lists at most 200 files and ignores Git, virtual environments, and caches.
+- `read_text_file` reads UTF-8 files up to 100,000 bytes inside the workspace.
+- `git_status` runs only the fixed read-only Git status command.
+
+DeepSeek may request a registered tool, but Ato's Python code validates the tool name
+and arguments and performs the operation. There is no general shell, write, delete,
+or Python-execution capability in this Phase 3 foundation.

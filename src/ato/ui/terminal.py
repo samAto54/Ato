@@ -9,6 +9,7 @@ from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.memory import JsonMemoryStore
 from ato.providers import DeepSeekProvider
+from ato.tools import build_read_only_registry
 
 EXIT_COMMANDS = {"exit", "quit"}
 CLEAR_MEMORY_COMMAND = "/clear-memory"
@@ -67,8 +68,12 @@ def main() -> None:
             max_messages=settings.memory_max_messages,
         )
         history = memory_store.load_history()
+        tool_registry = build_read_only_registry(settings.workspace_root)
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")
         raise SystemExit(1) from exc
 
-    run_terminal(Agent(provider, history=history), memory_store=memory_store)
+    run_terminal(
+        Agent(provider, history=history, tools=tool_registry),
+        memory_store=memory_store,
+    )

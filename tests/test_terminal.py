@@ -7,7 +7,8 @@ from ato.ui.terminal import run_terminal
 
 
 class EchoLLM:
-    def generate(self, messages: Sequence[Message]) -> str:
+    def generate(self, messages: Sequence[Message], tools=None) -> str:
+        del tools
         return f"Echo: {messages[-1].content}"
 
 
