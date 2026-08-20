@@ -84,6 +84,8 @@ def fetch_web_page(url: str) -> str:
     return json.dumps(
         {
             "url": parsed.geturl(),
+            "source_url": parsed.geturl(),
+            "content_trust": "untrusted_external",
             "status": response.status,
             "title": title,
             "text": text[:MAX_WEB_TEXT_CHARS],

@@ -19,6 +19,8 @@ def test_live_public_https_fetch() -> None:
 
     assert result["status"] == 200
     assert result["url"] == "https://example.com/"
+    assert result["source_url"] == "https://example.com/"
+    assert result["content_trust"] == "untrusted_external"
     assert "Example Domain" in result["title"]
     assert result["text"]
     assert result["truncated"] is False
