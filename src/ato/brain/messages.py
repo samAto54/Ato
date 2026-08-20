@@ -22,5 +22,7 @@ class Message:
     content: str
 
     def __post_init__(self) -> None:
+        if not isinstance(self.role, Role):
+            raise TypeError("Message role must be a Role value.")
         if not self.content.strip():
             raise ValueError("Message content cannot be empty.")

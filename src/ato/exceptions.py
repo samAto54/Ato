@@ -11,3 +11,7 @@ class ConfigurationError(AtoError):
 
 class LLMError(AtoError):
     """Raised when a language model provider cannot produce a response."""
+
+
+class MemoryStoreError(AtoError):
+    """Raised when persistent memory cannot be read, written, or cleared."""

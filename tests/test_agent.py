@@ -44,3 +44,19 @@ def test_agent_rejects_empty_input() -> None:
     agent = Agent(FakeLLM(["unused"]))
     with pytest.raises(ValueError, match="cannot be empty"):
         agent.respond("   ")
+
+
+def test_agent_restores_history_and_can_clear_it() -> None:
+    history = [
+        Message(Role.USER, "My favorite color is green."),
+        Message(Role.ASSISTANT, "I'll remember that."),
+    ]
+    llm = FakeLLM(["Green."])
+    agent = Agent(llm, history=history)
+
+    assert agent.respond("What is my favorite color?") == "Green."
+    assert llm.calls[0][1:3] == tuple(history)
+
+    agent.clear_conversation()
+    assert len(agent.messages) == 1
+    assert agent.conversation == ()

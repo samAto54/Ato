@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -16,6 +17,8 @@ class Settings:
 
     deepseek_api_key: str
     model: str = "deepseek-v4-flash"
+    memory_file: Path = Path("data/memory.json")
+    memory_max_messages: int = 40
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -23,6 +26,8 @@ class Settings:
         load_dotenv()
         api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
         model = os.getenv("ATO_MODEL", "deepseek-v4-flash").strip()
+        memory_file = Path(os.getenv("ATO_MEMORY_FILE", "data/memory.json").strip())
+        raw_max_messages = os.getenv("ATO_MEMORY_MAX_MESSAGES", "40").strip()
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -31,4 +36,16 @@ class Settings:
         if not model:
             raise ConfigurationError("ATO_MODEL cannot be empty.")
 
-        return cls(deepseek_api_key=api_key, model=model)
+        try:
+            max_messages = int(raw_max_messages)
+        except ValueError as exc:
+            raise ConfigurationError("ATO_MEMORY_MAX_MESSAGES must be an integer.") from exc
+        if max_messages < 2:
+            raise ConfigurationError("ATO_MEMORY_MAX_MESSAGES must be at least 2.")
+
+        return cls(
+            deepseek_api_key=api_key,
+            model=model,
+            memory_file=memory_file,
+            memory_max_messages=max_messages,
+        )

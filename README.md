@@ -6,18 +6,21 @@ chatbots.
 
 ## Current functionality
 
-Phase 1 currently provides:
+The current Phase 2 build provides:
 
 - An interactive terminal conversation
-- Conversation context for the lifetime of the current process
+- Conversation context during the current process
+- Persistent recent conversation history across restarts
+- Bounded, versioned JSON memory with atomic writes
+- A `/clear-memory` command for deleting saved conversation context
 - A provider-neutral `LLMClient` interface
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Environment-based configuration with no hard-coded secrets
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-Persistent memory, tools, autonomous workflows, voice, GUI, and cybersecurity
-capabilities are intentionally reserved for later phases.
+Semantic memory retrieval, tools, autonomous workflows, voice, GUI, and
+cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
 `legacy/phase0`. It is intentionally isolated from the active package so useful
@@ -29,6 +32,7 @@ ideas can be migrated during the appropriate phases without destabilizing Phase 
 ato/
 |-- src/ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
+|   |-- memory/         # Validated, atomic JSON persistence
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- ui/             # Terminal and future user interfaces
 |   |-- config.py       # Environment configuration
@@ -82,6 +86,8 @@ Edit `.env` and replace the placeholder with your own API key:
 ```dotenv
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ATO_MODEL=deepseek-v4-flash
+ATO_MEMORY_FILE=data/memory.json
+ATO_MEMORY_MAX_MESSAGES=40
 ```
 
 Never commit `.env`; it is excluded by `.gitignore`.
@@ -93,6 +99,8 @@ python -m ato
 ```
 
 You can also run the installed `ato` command. Enter `exit` or `quit` to close.
+Successful turns are saved to `data/memory.json` and restored on the next run.
+Use `/clear-memory` to remove both the saved history and the current context.
 
 ## Verify the project
 
@@ -107,8 +115,12 @@ The tests use fake or mocked providers and do not consume API credits.
 
 ```text
 Terminal UI -> Agent Core -> LLMClient -> DeepSeek Chat API
+     |             ^
+     `-> JSON Memory Store
 ```
 
 `Agent` owns conversation state and has no DeepSeek dependency. `DeepSeekProvider`
 translates Ato messages to the provider API, allowing future providers or interfaces
-to be added without rewriting the Agent Core.
+to be added without rewriting the Agent Core. `JsonMemoryStore` persists only user
+and assistant messages; the system prompt and API credentials are never written to
+the memory file.

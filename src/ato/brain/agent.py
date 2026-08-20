@@ -12,16 +12,32 @@ from ato.brain.prompts import SYSTEM_PROMPT
 class Agent:
     """Manage one in-memory conversation with an injected LLM provider."""
 
-    def __init__(self, llm: LLMClient, system_prompt: str = SYSTEM_PROMPT) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        system_prompt: str = SYSTEM_PROMPT,
+        history: Sequence[Message] = (),
+    ) -> None:
         if not system_prompt.strip():
             raise ValueError("The system prompt cannot be empty.")
         self._llm = llm
-        self._messages = [Message(Role.SYSTEM, system_prompt)]
+        if any(message.role is Role.SYSTEM for message in history):
+            raise ValueError("Restored history cannot contain system messages.")
+        self._messages = [Message(Role.SYSTEM, system_prompt), *history]
 
     @property
     def messages(self) -> Sequence[Message]:
         """Return an immutable snapshot of the current conversation."""
         return tuple(self._messages)
+
+    @property
+    def conversation(self) -> Sequence[Message]:
+        """Return user and assistant messages without the system prompt."""
+        return tuple(self._messages[1:])
+
+    def clear_conversation(self) -> None:
+        """Clear conversation context while retaining the system prompt."""
+        del self._messages[1:]
 
     def respond(self, user_input: str) -> str:
         """Add user input, request a reply, and record a successful response."""
