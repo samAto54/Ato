@@ -17,6 +17,10 @@ class MemoryStoreError(AtoError):
     """Raised when persistent memory cannot be read, written, or cleared."""
 
 
+class ContextWindowError(AtoError):
+    """Raised when recent content cannot fit safely inside the context budget."""
+
+
 class ToolError(AtoError):
     """Raised when a tool request is invalid, unauthorized, or fails safely."""
 

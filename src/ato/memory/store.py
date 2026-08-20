@@ -5,14 +5,23 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ato.brain.messages import Message, Role
 from ato.exceptions import MemoryStoreError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PERSISTED_ROLES = {Role.USER, Role.ASSISTANT}
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryContext:
+    """Persisted summary and recent verbatim conversation history."""
+
+    summary: str
+    history: tuple[Message, ...]
 
 
 class JsonMemoryStore:
@@ -26,8 +35,12 @@ class JsonMemoryStore:
 
     def load_history(self) -> tuple[Message, ...]:
         """Load and validate persisted user/assistant messages."""
+        return self.load_context().history
+
+    def load_context(self) -> MemoryContext:
+        """Load and validate the persisted summary and recent messages."""
         if not self.path.exists():
-            return ()
+            return MemoryContext("", ())
 
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
@@ -38,13 +51,19 @@ class JsonMemoryStore:
 
     def save_history(self, messages: Sequence[Message]) -> None:
         """Atomically save the most recent user/assistant messages."""
+        self.save_context(messages)
+
+    def save_context(self, messages: Sequence[Message], summary: str = "") -> None:
+        """Atomically save a bounded summary and recent conversation messages."""
+        if not isinstance(summary, str):
+            raise TypeError("summary must be a string.")
         persisted = [message for message in messages if message.role in PERSISTED_ROLES]
         persisted = persisted[-self.max_messages :]
         payload = {
             "version": SCHEMA_VERSION,
+            "summary": summary.strip(),
             "history": [
-                {"role": message.role.value, "content": message.content}
-                for message in persisted
+                {"role": message.role.value, "content": message.content} for message in persisted
             ],
         }
 
@@ -67,9 +86,13 @@ class JsonMemoryStore:
         except OSError as exc:
             raise MemoryStoreError(f"Could not clear memory file: {self.path}") from exc
 
-    def _parse_payload(self, payload: Any) -> tuple[Message, ...]:
-        if not isinstance(payload, dict) or payload.get("version") != SCHEMA_VERSION:
+    def _parse_payload(self, payload: Any) -> MemoryContext:
+        if not isinstance(payload, dict) or payload.get("version") not in {1, SCHEMA_VERSION}:
             raise MemoryStoreError("Memory file has an unsupported schema version.")
+
+        summary = payload.get("summary", "")
+        if not isinstance(summary, str):
+            raise MemoryStoreError("Memory file summary must be text.")
 
         raw_history = payload.get("history")
         if not isinstance(raw_history, list):
@@ -91,4 +114,4 @@ class JsonMemoryStore:
             except ValueError as exc:
                 raise MemoryStoreError("Memory file contains an empty message.") from exc
 
-        return tuple(history[-self.max_messages :])
+        return MemoryContext(summary.strip(), tuple(history[-self.max_messages :]))

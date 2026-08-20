@@ -11,6 +11,8 @@ The current Phase 3 build provides:
 - An interactive terminal conversation
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
+- Configurable context budgeting with deterministic compaction of older turns
+- Persisted summaries with recent messages retained verbatim
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -96,6 +98,9 @@ DEEPSEEK_API_KEY=your_deepseek_api_key_here
 ATO_MODEL=deepseek-v4-flash
 ATO_MEMORY_FILE=data/memory.json
 ATO_MEMORY_MAX_MESSAGES=40
+ATO_CONTEXT_MAX_TOKENS=12000
+ATO_CONTEXT_RECENT_MESSAGES=12
+ATO_CONTEXT_SUMMARY_MAX_CHARS=6000
 ATO_WORKSPACE_ROOT=.
 ATO_AUDIT_FILE=data/audit.jsonl
 ```
@@ -135,6 +140,12 @@ to be added without rewriting the Agent Core. `JsonMemoryStore` persists only us
 and assistant messages; the system prompt and API credentials are never written to
 the memory file. `ToolRegistry` exposes only explicitly registered operations, and
 all file paths must remain inside `ATO_WORKSPACE_ROOT`.
+
+`ContextManager` uses a conservative provider-neutral token estimate. When history
+exceeds the configured budget, older turns are converted into a bounded, labelled
+summary while recent turns remain verbatim. The summary is stored separately in the
+version-2 memory format and injected as context, never as a fabricated assistant reply.
+Existing version-1 memory files migrate automatically when next saved.
 
 ## Phase 3 tool safety
 
