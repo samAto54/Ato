@@ -122,9 +122,16 @@ class ToolRegistry:
         if missing:
             raise ToolError(f"Missing arguments for {tool.name}: {sorted(missing)}")
 
-        python_types = {"string": str, "boolean": bool, "integer": int}
+        python_types = {"string": str, "boolean": bool, "integer": int, "array": list}
         for key, value in arguments.items():
             expected_name = properties[key].get("type")
             expected_type = python_types.get(expected_name)
             if expected_type is not None and not isinstance(value, expected_type):
                 raise ToolError(f"Argument {key} for {tool.name} must be {expected_name}.")
+            if expected_name == "array":
+                item_type_name = properties[key].get("items", {}).get("type")
+                item_type = python_types.get(item_type_name)
+                if item_type is not None and any(not isinstance(item, item_type) for item in value):
+                    raise ToolError(
+                        f"Every item in {key} for {tool.name} must be {item_type_name}."
+                    )

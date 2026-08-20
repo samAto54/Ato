@@ -32,6 +32,30 @@ def test_registry_rejects_unknown_and_invalid_arguments() -> None:
         registry.execute("sample", {"value": "yes", "extra": "no"})
 
 
+def test_registry_validates_array_item_types() -> None:
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="paths",
+            description="Paths.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "values": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    }
+                },
+                "required": ["values"],
+            },
+            handler=lambda arguments: "ok",
+        )
+    )
+
+    with pytest.raises(ToolError, match="Every item"):
+        registry.execute("paths", {"values": ["valid", 2]})
+
+
 def test_file_tools_are_limited_to_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -189,3 +213,51 @@ def test_trash_text_file_denial_and_target_guards(tmp_path: Path) -> None:
         allowed.execute("trash_text_file", {"path": "folder"})
     with pytest.raises(ToolError, match="protected"):
         allowed.execute("trash_text_file", {"path": "data/memory.json"})
+
+
+def test_git_commit_files_commits_only_named_paths_and_preserves_staging(tmp_path: Path) -> None:
+    def git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *arguments], cwd=tmp_path, capture_output=True, text=True, check=True
+        )
+
+    git("init")
+    git("config", "user.email", "ato-tests@example.invalid")
+    git("config", "user.name", "Ato Tests")
+    tracked = tmp_path / "tracked.txt"
+    unrelated = tmp_path / "unrelated.txt"
+    tracked.write_text("initial", encoding="utf-8")
+    unrelated.write_text("initial", encoding="utf-8")
+    git("add", "tracked.txt", "unrelated.txt")
+    git("commit", "-m", "initial")
+    tracked.write_text("selected change", encoding="utf-8")
+    unrelated.write_text("staged change", encoding="utf-8")
+    git("add", "unrelated.txt")
+    seen = []
+    registry = build_phase3_registry(
+        tmp_path, PermissionManager(lambda request: not seen.append(request))
+    )
+    branches = json.loads(registry.execute("git_branches", {}))
+    assert "* " in branches["output"]
+
+    result = json.loads(
+        registry.execute(
+            "git_commit_files",
+            {"paths": ["tracked.txt"], "message": "Commit selected path"},
+        )
+    )
+
+    assert seen[0].level.value == "HIGH"
+    assert result["committed_paths"] == ["tracked.txt"]
+    assert "tracked.txt" in git("show", "--pretty=", "--name-only", "HEAD").stdout
+    assert git("diff", "--cached", "--name-only").stdout.strip() == "unrelated.txt"
+
+
+def test_git_commit_files_fails_closed_without_confirmation(tmp_path: Path) -> None:
+    registry = build_phase3_registry(tmp_path)
+
+    with pytest.raises(ToolError, match="Permission denied"):
+        registry.execute(
+            "git_commit_files",
+            {"paths": ["file.txt"], "message": "No permission"},
+        )
