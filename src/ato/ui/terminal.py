@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from collections.abc import Callable
 
 from ato.brain.agent import Agent
@@ -34,6 +35,7 @@ def run_terminal(
     memory_store: JsonMemoryStore | None = None,
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
+    write_chunk: Callable[[str], None] | None = None,
 ) -> None:
     """Run the interactive terminal loop for an existing agent."""
     write("Ato is ready. Type 'exit' or 'quit' to stop. Use /clear-memory to reset history.")
@@ -61,15 +63,37 @@ def run_terminal(
         if not user_input:
             continue
 
+        streaming_started = False
+        emit = write_chunk or _write_terminal_chunk
         try:
-            reply = agent.respond(user_input)
+            if agent.can_stream:
+                chunks = agent.respond_stream(user_input)
+                first = next(chunks)
+                streaming_started = True
+                emit("Ato: ")
+                emit(first)
+                for chunk in chunks:
+                    emit(chunk)
+                emit("\n")
+            else:
+                reply = agent.respond(user_input)
+                write(f"Ato: {reply}")
             if memory_store is not None:
                 memory_store.save_context(agent.conversation, agent.summary)
+        except StopIteration:
+            write("Ato error: The language model returned an empty response.")
+            continue
         except AtoError as exc:
+            if streaming_started:
+                emit("\n")
             write(f"Ato error: {exc}")
             continue
 
-        write(f"Ato: {reply}")
+
+def _write_terminal_chunk(text: str) -> None:
+    """Write one response fragment without inserting extra line breaks."""
+    sys.stdout.write(text)
+    sys.stdout.flush()
 
 
 def main() -> None:

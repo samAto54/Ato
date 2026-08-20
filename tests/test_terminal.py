@@ -12,6 +12,13 @@ class EchoLLM:
         return f"Echo: {messages[-1].content}"
 
 
+class StreamingEchoLLM(EchoLLM):
+    def stream(self, messages: Sequence[Message], tools=None):
+        del tools
+        yield "Echo: "
+        yield messages[-1].content
+
+
 def test_terminal_conversation_and_exit() -> None:
     inputs = iter(["Hello", "quit"])
     output: list[str] = []
@@ -57,3 +64,20 @@ def test_terminal_clear_memory_resets_disk_and_agent(tmp_path) -> None:
     assert store.load_history() == ()
     assert agent.conversation == ()
     assert "Ato: Persistent conversation memory cleared." in output
+
+
+def test_terminal_displays_streaming_chunks_and_saves_completed_turn(tmp_path) -> None:
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    inputs = iter(["Hello", "quit"])
+    chunks: list[str] = []
+
+    run_terminal(
+        Agent(StreamingEchoLLM()),
+        memory_store=store,
+        read=lambda prompt: next(inputs),
+        write=lambda text: None,
+        write_chunk=chunks.append,
+    )
+
+    assert chunks == ["Ato: ", "Echo: ", "Hello", "\n"]
+    assert store.load_history()[-1] == Message(Role.ASSISTANT, "Echo: Hello")

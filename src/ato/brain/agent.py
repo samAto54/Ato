@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from ato.brain.context import ContextManager
 from ato.brain.llm import LLMClient
@@ -55,6 +55,34 @@ class Agent:
 
     def respond(self, user_input: str) -> str:
         """Add user input, request a reply, and record a successful response."""
+        user_message, model_messages = self._prepare_response(user_input)
+        response = self._llm.generate(model_messages, tools=self._tools).strip()
+        self._commit_response(user_message, response)
+        return response
+
+    @property
+    def can_stream(self) -> bool:
+        """Return whether the configured provider supports incremental responses."""
+        return callable(getattr(self._llm, "stream", None))
+
+    def respond_stream(self, user_input: str) -> Iterator[str]:
+        """Yield a response incrementally and commit only after successful completion."""
+        user_message, model_messages = self._prepare_response(user_input)
+        stream = getattr(self._llm, "stream", None)
+        if not callable(stream):
+            response = self._llm.generate(model_messages, tools=self._tools).strip()
+            self._commit_response(user_message, response)
+            yield response
+            return
+
+        fragments: list[str] = []
+        for fragment in stream(model_messages, tools=self._tools):
+            if fragment:
+                fragments.append(fragment)
+                yield fragment
+        self._commit_response(user_message, "".join(fragments).strip())
+
+    def _prepare_response(self, user_input: str) -> tuple[Message, list[Message]]:
         cleaned_input = user_input.strip()
         if not cleaned_input:
             raise ValueError("User input cannot be empty.")
@@ -66,8 +94,9 @@ class Agent:
         if summary_message is not None:
             model_messages.append(summary_message)
         model_messages.extend(pending.messages)
-        response = self._llm.generate(model_messages, tools=self._tools).strip()
+        return user_message, model_messages
 
+    def _commit_response(self, user_message: Message, response: str) -> None:
         if not response:
             raise ValueError("The language model returned an empty response.")
 
@@ -77,4 +106,3 @@ class Agent:
         )
         self._summary = completed.summary
         self._messages = [self._messages[0], *completed.messages]
-        return response

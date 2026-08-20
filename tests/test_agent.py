@@ -25,7 +25,10 @@ def test_agent_retains_conversation_context() -> None:
     assert agent.respond("My name is Sam") == "Hello Sam."
     assert agent.respond("What is my name?") == "Your name is Sam."
     assert [message.role for message in llm.calls[1]] == [
-        Role.SYSTEM, Role.USER, Role.ASSISTANT, Role.USER
+        Role.SYSTEM,
+        Role.USER,
+        Role.ASSISTANT,
+        Role.USER,
     ]
     assert llm.calls[1][1].content == "My name is Sam"
     assert llm.calls[1][2].content == "Hello Sam."
@@ -69,3 +72,29 @@ def test_system_prompt_explains_restored_cross_session_context() -> None:
     assert "local persistent memory" in SYSTEM_PROMPT
     assert "Do not claim that you lack cross-session memory" in SYSTEM_PROMPT
     assert "approved read-only tools" in SYSTEM_PROMPT
+
+
+def test_streaming_agent_commits_only_completed_responses() -> None:
+    class StreamingLLM:
+        def generate(self, messages: Sequence[Message], tools=None) -> str:
+            raise AssertionError("non-streaming method should not be called")
+
+        def stream(self, messages: Sequence[Message], tools=None):
+            del messages, tools
+            yield "Hello"
+            yield " Sam"
+
+    agent = Agent(StreamingLLM())
+    assert list(agent.respond_stream("Hi")) == ["Hello", " Sam"]
+    assert agent.conversation[-1] == Message(Role.ASSISTANT, "Hello Sam")
+
+    class FailingStream(StreamingLLM):
+        def stream(self, messages: Sequence[Message], tools=None):
+            del messages, tools
+            yield "partial"
+            raise RuntimeError("stream failed")
+
+    failed_agent = Agent(FailingStream())
+    with pytest.raises(RuntimeError, match="stream failed"):
+        list(failed_agent.respond_stream("Hi"))
+    assert failed_agent.conversation == ()
