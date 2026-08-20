@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from ato.exceptions import ToolError
+from ato.security.audit import AuditLogger
+from ato.security.permissions import (
+    PermissionDecision,
+    PermissionLevel,
+    PermissionManager,
+    PermissionRequest,
+)
 
 ToolHandler = Callable[[Mapping[str, Any]], str]
 
@@ -19,6 +26,7 @@ class ToolSpec:
     description: str
     parameters: Mapping[str, Any]
     handler: ToolHandler
+    permission: PermissionLevel = PermissionLevel.LOW
 
     def api_definition(self) -> dict[str, Any]:
         return {
@@ -34,8 +42,14 @@ class ToolSpec:
 class ToolRegistry:
     """Store and execute only explicitly registered tools."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        permission_manager: PermissionManager | None = None,
+        audit_logger: AuditLogger | None = None,
+    ) -> None:
         self._tools: dict[str, ToolSpec] = {}
+        self._permission_manager = permission_manager or PermissionManager()
+        self._audit_logger = audit_logger
 
     def register(self, tool: ToolSpec) -> None:
         if tool.name in self._tools:
@@ -45,17 +59,53 @@ class ToolRegistry:
     def api_definitions(self) -> list[dict[str, Any]]:
         return [tool.api_definition() for tool in self._tools.values()]
 
-    def execute(self, name: str, arguments: Mapping[str, Any]) -> str:
+    def execute(
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        user_request: str | None = None,
+    ) -> str:
         tool = self._tools.get(name)
         if tool is None:
             raise ToolError(f"Tool is not registered: {name}")
         self._validate_arguments(tool, arguments)
+        if self._audit_logger is not None:
+            self._audit_logger.ensure_ready()
+        request = PermissionRequest(name, tool.permission, arguments, user_request)
+        decision = self._permission_manager.authorize(request)
+        if decision is PermissionDecision.DENY:
+            self._audit(tool, arguments, user_request, decision, error="User denied permission.")
+            raise ToolError(f"Permission denied for tool: {name}")
         try:
-            return tool.handler(arguments)
-        except ToolError:
+            result = tool.handler(arguments)
+        except ToolError as exc:
+            self._audit(tool, arguments, user_request, decision, error=str(exc))
             raise
         except Exception as exc:
+            self._audit(tool, arguments, user_request, decision, error="Tool failed safely.")
             raise ToolError(f"Tool failed safely: {name}") from exc
+        self._audit(tool, arguments, user_request, decision, result=result)
+        return result
+
+    def _audit(
+        self,
+        tool: ToolSpec,
+        arguments: Mapping[str, Any],
+        user_request: str | None,
+        decision: PermissionDecision,
+        result: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        if self._audit_logger is not None:
+            self._audit_logger.record(
+                user_request=user_request,
+                tool_name=tool.name,
+                arguments=arguments,
+                permission=tool.permission,
+                decision=decision,
+                result=result,
+                error=error,
+            )
 
     @staticmethod
     def _validate_arguments(tool: ToolSpec, arguments: Mapping[str, Any]) -> None:

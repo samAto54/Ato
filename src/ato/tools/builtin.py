@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from ato.exceptions import ToolError
+from ato.security.audit import AuditLogger
+from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
@@ -34,10 +36,14 @@ class WorkspaceBoundary:
         return candidate
 
 
-def build_read_only_registry(workspace_root: Path) -> ToolRegistry:
+def build_read_only_registry(
+    workspace_root: Path,
+    permission_manager: PermissionManager | None = None,
+    audit_logger: AuditLogger | None = None,
+) -> ToolRegistry:
     """Create the Phase 3 registry containing only read-only tools."""
     boundary = WorkspaceBoundary(workspace_root)
-    registry = ToolRegistry()
+    registry = ToolRegistry(permission_manager, audit_logger)
 
     def list_files(arguments: Mapping[str, Any]) -> str:
         directory = boundary.resolve(str(arguments.get("path", ".")))
@@ -110,6 +116,7 @@ def build_read_only_registry(workspace_root: Path) -> ToolRegistry:
                 "additionalProperties": False,
             },
             handler=list_files,
+            permission=PermissionLevel.LOW,
         )
     )
     registry.register(
@@ -125,6 +132,7 @@ def build_read_only_registry(workspace_root: Path) -> ToolRegistry:
                 "additionalProperties": False,
             },
             handler=read_text_file,
+            permission=PermissionLevel.LOW,
         )
     )
     registry.register(
@@ -133,6 +141,7 @@ def build_read_only_registry(workspace_root: Path) -> ToolRegistry:
             description="Show the read-only Git status of the authorized Ato workspace.",
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=git_status,
+            permission=PermissionLevel.LOW,
         )
     )
     return registry

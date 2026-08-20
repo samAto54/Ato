@@ -16,6 +16,8 @@ The current Phase 3 build provides:
 - An allowlisted tool registry with validated arguments
 - Read-only tools for listing files, reading small text files, and checking Git status
 - Workspace path boundaries and a maximum tool-call limit
+- LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
+- Redacted append-only JSONL audit logging for every tool execution decision
 - A provider-neutral `LLMClient` interface
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Environment-based configuration with no hard-coded secrets
@@ -37,6 +39,7 @@ ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
 |   |-- memory/         # Validated, atomic JSON persistence
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
+|   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
 |   |-- ui/             # Terminal and future user interfaces
 |   |-- config.py       # Environment configuration
@@ -93,6 +96,7 @@ ATO_MODEL=deepseek-v4-flash
 ATO_MEMORY_FILE=data/memory.json
 ATO_MEMORY_MAX_MESSAGES=40
 ATO_WORKSPACE_ROOT=.
+ATO_AUDIT_FILE=data/audit.jsonl
 ```
 
 Never commit `.env`; it is excluded by `.gitignore`.
@@ -142,3 +146,13 @@ The initial tools are deliberately read-only:
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. There is no general shell, write, delete,
 or Python-execution capability in this Phase 3 foundation.
+
+Every tool has a permission level:
+
+- `LOW` tools run automatically and are still audited.
+- `MEDIUM`, `HIGH`, and `CRITICAL` tools require an explicit Allow/Deny decision.
+- If no confirmation handler or audit log is available, protected execution fails closed.
+
+Audit events are appended to `data/audit.jsonl` with the time, sanitized user request,
+tool, redacted arguments, permission level, decision, and a result length and SHA-256
+digest. Raw tool results are not copied into the audit log.

@@ -19,3 +19,7 @@ class MemoryStoreError(AtoError):
 
 class ToolError(AtoError):
     """Raised when a tool request is invalid, unauthorized, or fails safely."""
+
+
+class AuditError(ToolError):
+    """Raised when required tool audit logging is unavailable."""

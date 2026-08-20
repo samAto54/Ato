@@ -10,12 +10,14 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_MEMORY_FILE", "custom/memory.json")
     monkeypatch.setenv("ATO_MEMORY_MAX_MESSAGES", "24")
     monkeypatch.setenv("ATO_WORKSPACE_ROOT", "workspace")
+    monkeypatch.setenv("ATO_AUDIT_FILE", "logs/audit.jsonl")
     settings = Settings.from_env()
     assert settings.deepseek_api_key == "test-key"
     assert settings.model == "test-model"
     assert str(settings.memory_file) == "custom\\memory.json"
     assert settings.memory_max_messages == 24
     assert str(settings.workspace_root) == "workspace"
+    assert str(settings.audit_file) == "logs\\audit.jsonl"
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

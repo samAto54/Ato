@@ -20,6 +20,7 @@ class Settings:
     memory_file: Path = Path("data/memory.json")
     memory_max_messages: int = 40
     workspace_root: Path = Path(".")
+    audit_file: Path = Path("data/audit.jsonl")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -30,6 +31,7 @@ class Settings:
         memory_file = Path(os.getenv("ATO_MEMORY_FILE", "data/memory.json").strip())
         raw_max_messages = os.getenv("ATO_MEMORY_MAX_MESSAGES", "40").strip()
         workspace_root = Path(os.getenv("ATO_WORKSPACE_ROOT", ".").strip())
+        audit_file = Path(os.getenv("ATO_AUDIT_FILE", "data/audit.jsonl").strip())
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -51,4 +53,5 @@ class Settings:
             memory_file=memory_file,
             memory_max_messages=max_messages,
             workspace_root=workspace_root,
+            audit_file=audit_file,
         )

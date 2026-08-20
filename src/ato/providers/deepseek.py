@@ -32,6 +32,10 @@ class DeepSeekProvider:
             {"role": message.role.value, "content": message.content}
             for message in messages
         ]
+        user_request = next(
+            (message.content for message in reversed(messages) if message.role.value == "user"),
+            None,
+        )
 
         tool_rounds = 0
         while True:
@@ -67,7 +71,12 @@ class DeepSeekProvider:
                 }
             )
             for call in tool_calls:
-                result = self._execute_tool_call(tools, call.function.name, call.function.arguments)
+                result = self._execute_tool_call(
+                    tools,
+                    call.function.name,
+                    call.function.arguments,
+                    user_request,
+                )
                 conversation.append(
                     {"role": "tool", "tool_call_id": call.id, "content": result}
                 )
@@ -97,11 +106,16 @@ class DeepSeekProvider:
             raise LLMError(f"DeepSeek request failed: {exc}") from exc
 
     @staticmethod
-    def _execute_tool_call(registry: ToolRegistry, name: str, raw_arguments: str) -> str:
+    def _execute_tool_call(
+        registry: ToolRegistry,
+        name: str,
+        raw_arguments: str,
+        user_request: str | None,
+    ) -> str:
         try:
             arguments = json.loads(raw_arguments)
             if not isinstance(arguments, dict):
                 raise ToolError("Tool arguments must be a JSON object.")
-            return registry.execute(name, arguments)
+            return registry.execute(name, arguments, user_request=user_request)
         except (json.JSONDecodeError, ToolError) as exc:
             return f"Tool error: {exc}"
