@@ -1,0 +1,13 @@
+"""Application-specific exceptions."""
+
+
+class AtoError(Exception):
+    """Base class for expected Ato errors."""
+
+
+class ConfigurationError(AtoError):
+    """Raised when required configuration is missing or invalid."""
+
+
+class LLMError(AtoError):
+    """Raised when a language model provider cannot produce a response."""
