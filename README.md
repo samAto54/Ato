@@ -15,6 +15,7 @@ The current Phase 3 build provides:
 - Configurable context budgeting with deterministic compaction of older turns
 - Persisted summaries with recent messages retained verbatim
 - Explicit SQLite long-term facts with bounded relevance retrieval
+- Local document ingestion and retrieval for text, Markdown, CSV, and source code
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -111,6 +112,7 @@ ATO_CONTEXT_MAX_TOKENS=12000
 ATO_CONTEXT_RECENT_MESSAGES=12
 ATO_CONTEXT_SUMMARY_MAX_CHARS=6000
 ATO_LONG_TERM_MEMORY_FILE=data/long_term_memory.db
+ATO_KNOWLEDGE_FILE=data/knowledge.db
 ATO_WORKSPACE_ROOT=.
 ATO_AUDIT_FILE=data/audit.jsonl
 ```
@@ -164,6 +166,17 @@ delete one after confirmation. Relevant facts are retrieved with bounded local
 keyword matching and injected as data rather than instructions. Likely passwords,
 API keys, tokens, and secrets are rejected. The SQLite database is local plain text,
 is excluded from Git, and should be protected using normal operating-system access controls.
+
+Local RAG is available through `/ingest <workspace-path>`, `/knowledge`, and confirmed
+`/remove-document <id>` commands. The first ingestion phase accepts UTF-8 TXT, Markdown,
+CSV, JSON, common source-code, and configuration formats up to 500,000 bytes. Documents
+are chunked into ignored local SQLite storage and retrieved with bounded keyword scoring.
+Re-ingesting an unchanged document is idempotent; changed documents replace their old
+chunks. Environment files, protected directories, symlinks, unsupported formats, paths
+outside the workspace, and content that appears to contain secrets are rejected. PDF,
+DOCX, embeddings, and external vector databases remain future additions.
+Ingestion requires confirmation that relevant excerpts may be sent to the configured
+model provider during future questions; cancelling leaves the knowledge base unchanged.
 
 The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments are
 reassembled and validated before execution, and tool results remain subject to the

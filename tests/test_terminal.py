@@ -2,6 +2,7 @@ from collections.abc import Sequence
 
 from ato.brain.agent import Agent
 from ato.brain.messages import Message, Role
+from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.ui.terminal import run_terminal
 
@@ -102,3 +103,39 @@ def test_terminal_manages_explicit_long_term_memories(tmp_path) -> None:
     assert "  1: My favorite color is green." in output
     assert "Ato: Memory forgotten." in output
     assert store.list_memories() == ()
+
+
+def test_terminal_manages_knowledge_documents(tmp_path) -> None:
+    (tmp_path / "notes.md").write_text("Ato knowledge", encoding="utf-8")
+    store = SqliteKnowledgeStore(tmp_path / "data" / "knowledge.db", tmp_path)
+    inputs = iter(
+        ["/ingest notes.md", "yes", "/knowledge", "/remove-document 1", "yes", "quit"]
+    )
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM()),
+        knowledge_store=store,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert any("Ingested document 1" in line for line in output)
+    assert any("1: notes.md" in line for line in output)
+    assert "Ato: Document removed." in output
+    assert store.list_documents() == ()
+
+
+def test_terminal_cancelled_ingestion_stores_nothing(tmp_path) -> None:
+    (tmp_path / "private.md").write_text("private notes", encoding="utf-8")
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db", tmp_path)
+    inputs = iter(["/ingest private.md", "no", "quit"])
+
+    run_terminal(
+        Agent(EchoLLM()),
+        knowledge_store=store,
+        read=lambda prompt: next(inputs),
+        write=lambda text: None,
+    )
+
+    assert store.list_documents() == ()

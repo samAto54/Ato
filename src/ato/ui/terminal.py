@@ -8,8 +8,10 @@ from collections.abc import Callable
 
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
+from ato.brain.memory import CompositeMemoryRetriever
 from ato.config import Settings
 from ato.exceptions import AtoError
+from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
@@ -20,6 +22,9 @@ CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
 FORGET_PREFIX = "/forget "
+INGEST_PREFIX = "/ingest "
+LIST_KNOWLEDGE_COMMAND = "/knowledge"
+REMOVE_DOCUMENT_PREFIX = "/remove-document "
 
 
 def confirm_tool(request: PermissionRequest) -> bool:
@@ -37,6 +42,7 @@ def run_terminal(
     agent: Agent,
     memory_store: JsonMemoryStore | None = None,
     long_term_memory: SqliteLongTermMemory | None = None,
+    knowledge_store: SqliteKnowledgeStore | None = None,
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
     write_chunk: Callable[[str], None] | None = None,
@@ -121,6 +127,70 @@ def run_terminal(
         if user_input.lower() == FORGET_PREFIX.strip():
             write("Ato error: Use /forget followed by a numeric memory ID.")
             continue
+        if user_input.lower().startswith(INGEST_PREFIX):
+            if knowledge_store is None:
+                write("Ato error: Knowledge storage is unavailable.")
+                continue
+            answer = read(
+                "Ingest this document and allow relevant excerpts to be sent to the "
+                "configured model? [y/N]: "
+            ).strip().lower()
+            if answer not in {"y", "yes"}:
+                write("Ato: Document ingestion cancelled.")
+                continue
+            try:
+                document = knowledge_store.ingest(user_input[len(INGEST_PREFIX) :])
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write(
+                    f"Ato: Ingested document {document.id} ({document.path}, "
+                    f"{document.chunks} chunks)."
+                )
+            continue
+        if user_input.lower() == INGEST_PREFIX.strip():
+            write("Ato error: Use /ingest followed by a workspace-relative file path.")
+            continue
+        if user_input.lower() == LIST_KNOWLEDGE_COMMAND:
+            if knowledge_store is None:
+                write("Ato error: Knowledge storage is unavailable.")
+                continue
+            try:
+                documents = knowledge_store.list_documents()
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                if not documents:
+                    write("Ato: No knowledge documents ingested.")
+                else:
+                    write("Ato knowledge documents:")
+                    for document in documents:
+                        write(f"  {document.id}: {document.path} ({document.chunks} chunks)")
+            continue
+        if user_input.lower().startswith(REMOVE_DOCUMENT_PREFIX):
+            if knowledge_store is None:
+                write("Ato error: Knowledge storage is unavailable.")
+                continue
+            raw_id = user_input[len(REMOVE_DOCUMENT_PREFIX) :].strip()
+            try:
+                document_id = int(raw_id)
+            except ValueError:
+                write("Ato error: Use /remove-document followed by a numeric document ID.")
+                continue
+            answer = read(f"Remove knowledge document {document_id}? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                write("Ato: Document removal cancelled.")
+                continue
+            try:
+                removed = knowledge_store.remove_document(document_id)
+            except (AtoError, ValueError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Document removed." if removed else "Ato: Document ID not found.")
+            continue
+        if user_input.lower() == REMOVE_DOCUMENT_PREFIX.strip():
+            write("Ato error: Use /remove-document followed by a numeric document ID.")
+            continue
         if not user_input:
             continue
 
@@ -168,6 +238,7 @@ def main() -> None:
         )
         memory_context = memory_store.load_context()
         long_term_memory = SqliteLongTermMemory(settings.long_term_memory_file)
+        knowledge_store = SqliteKnowledgeStore(settings.knowledge_file, settings.workspace_root)
         tool_registry = build_phase3_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
@@ -188,9 +259,10 @@ def main() -> None:
                 max_summary_chars=settings.context_summary_max_chars,
                 max_messages=settings.memory_max_messages,
             ),
-            memory_retriever=long_term_memory,
+            memory_retriever=CompositeMemoryRetriever(long_term_memory, knowledge_store),
             tools=tool_registry,
         ),
         memory_store=memory_store,
         long_term_memory=long_term_memory,
+        knowledge_store=knowledge_store,
     )
