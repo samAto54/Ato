@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from ato.brain.llm import LLMClient
 from ato.brain.messages import Message, Role
 from ato.brain.prompts import SYSTEM_PROMPT
+from ato.tools.registry import ToolRegistry
 
 
 class Agent:
@@ -17,10 +18,12 @@ class Agent:
         llm: LLMClient,
         system_prompt: str = SYSTEM_PROMPT,
         history: Sequence[Message] = (),
+        tools: ToolRegistry | None = None,
     ) -> None:
         if not system_prompt.strip():
             raise ValueError("The system prompt cannot be empty.")
         self._llm = llm
+        self._tools = tools
         if any(message.role is Role.SYSTEM for message in history):
             raise ValueError("Restored history cannot contain system messages.")
         self._messages = [Message(Role.SYSTEM, system_prompt), *history]
@@ -47,7 +50,7 @@ class Agent:
 
         user_message = Message(Role.USER, cleaned_input)
         pending_messages = [*self._messages, user_message]
-        response = self._llm.generate(pending_messages).strip()
+        response = self._llm.generate(pending_messages, tools=self._tools).strip()
 
         if not response:
             raise ValueError("The language model returned an empty response.")

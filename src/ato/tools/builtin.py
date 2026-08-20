@@ -1,0 +1,364 @@
+"""Read-only tools constrained to an authorized workspace root."""
+
+from __future__ import annotations
+
+import ast
+import json
+import os
+import subprocess
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from ato.exceptions import ToolError
+from ato.security.audit import AuditLogger
+from ato.security.permissions import PermissionLevel, PermissionManager
+from ato.tools.registry import ToolRegistry, ToolSpec
+
+IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+MAX_LIST_RESULTS = 200
+MAX_TEXT_BYTES = 100_000
+MAX_SEARCH_FILES = 500
+MAX_SEARCH_RESULTS = 100
+MAX_COMMAND_OUTPUT = 50_000
+
+
+class WorkspaceBoundary:
+    """Resolve relative paths without allowing workspace escape."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve()
+
+    def resolve(self, relative_path: str) -> Path:
+        requested = Path(relative_path)
+        if requested.is_absolute():
+            raise ToolError("Tool paths must be relative to the authorized workspace.")
+        candidate = (self.root / requested).resolve()
+        try:
+            candidate.relative_to(self.root)
+        except ValueError as exc:
+            raise ToolError("Requested path is outside the authorized workspace.") from exc
+        return candidate
+
+    def contains(self, path: Path) -> bool:
+        """Return whether a discovered path resolves inside the workspace."""
+        try:
+            path.resolve().relative_to(self.root)
+        except (OSError, ValueError):
+            return False
+        return True
+
+
+def build_read_only_registry(
+    workspace_root: Path,
+    permission_manager: PermissionManager | None = None,
+    audit_logger: AuditLogger | None = None,
+) -> ToolRegistry:
+    """Create the Phase 3 inspection registry with no arbitrary command access."""
+    boundary = WorkspaceBoundary(workspace_root)
+    registry = ToolRegistry(permission_manager, audit_logger)
+
+    def list_files(arguments: Mapping[str, Any]) -> str:
+        directory = boundary.resolve(str(arguments.get("path", ".")))
+        recursive = bool(arguments.get("recursive", True))
+        if not directory.is_dir():
+            raise ToolError("The requested list path is not a directory.")
+        candidates = directory.rglob("*") if recursive else directory.iterdir()
+        files = [
+            path.relative_to(boundary.root).as_posix()
+            for path in candidates
+            if path.is_file()
+            and boundary.contains(path)
+            and not any(
+                part in IGNORED_DIRECTORIES for part in path.relative_to(boundary.root).parts
+            )
+        ]
+        files.sort()
+        truncated = len(files) > MAX_LIST_RESULTS
+        return json.dumps({"files": files[:MAX_LIST_RESULTS], "truncated": truncated})
+
+    def read_text_file(arguments: Mapping[str, Any]) -> str:
+        path = boundary.resolve(str(arguments["path"]))
+        if not path.is_file():
+            raise ToolError("The requested path is not a file.")
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise ToolError("The requested file could not be inspected.") from exc
+        if size > MAX_TEXT_BYTES:
+            raise ToolError(f"File exceeds the {MAX_TEXT_BYTES}-byte read limit.")
+        try:
+            return path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ToolError("The requested file is not readable UTF-8 text.") from exc
+
+    def git_status(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    f"safe.directory={boundary.root.as_posix()}",
+                    "status",
+                    "--short",
+                    "--branch",
+                ],
+                cwd=boundary.root,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ToolError("Git status could not be executed.") from exc
+        if result.returncode != 0:
+            raise ToolError("Git status failed for the authorized workspace.")
+        return result.stdout.strip() or "Working tree is clean."
+
+    def search_files(arguments: Mapping[str, Any]) -> str:
+        query = str(arguments["query"])
+        if not query:
+            raise ToolError("The search query cannot be empty.")
+        directory = boundary.resolve(str(arguments.get("path", ".")))
+        if not directory.is_dir():
+            raise ToolError("The requested search path is not a directory.")
+        case_sensitive = bool(arguments.get("case_sensitive", False))
+        needle = query if case_sensitive else query.casefold()
+        matches: list[dict[str, Any]] = []
+        scanned = 0
+        for path in directory.rglob("*"):
+            relative = path.relative_to(boundary.root)
+            if (
+                not path.is_file()
+                or not boundary.contains(path)
+                or any(part in IGNORED_DIRECTORIES for part in relative.parts)
+            ):
+                continue
+            if scanned >= MAX_SEARCH_FILES:
+                break
+            scanned += 1
+            try:
+                if path.stat().st_size > MAX_TEXT_BYTES:
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line_number, line in enumerate(lines, start=1):
+                haystack = line if case_sensitive else line.casefold()
+                if needle in haystack:
+                    matches.append(
+                        {"path": relative.as_posix(), "line": line_number, "text": line[:500]}
+                    )
+                    if len(matches) >= MAX_SEARCH_RESULTS:
+                        return json.dumps(
+                            {"matches": matches, "files_scanned": scanned, "truncated": True}
+                        )
+        return json.dumps(
+            {"matches": matches, "files_scanned": scanned, "truncated": scanned >= MAX_SEARCH_FILES}
+        )
+
+    def python_syntax_check(arguments: Mapping[str, Any]) -> str:
+        path = boundary.resolve(str(arguments["path"]))
+        if path.suffix.lower() != ".py" or not path.is_file():
+            raise ToolError("Syntax checking requires an existing .py file.")
+        try:
+            source = path.read_text(encoding="utf-8")
+            ast.parse(source, filename=path.name)
+        except UnicodeDecodeError as exc:
+            raise ToolError("The Python file is not readable UTF-8 text.") from exc
+        except OSError as exc:
+            raise ToolError("The Python file could not be read.") from exc
+        except SyntaxError as exc:
+            return json.dumps(
+                {"valid": False, "line": exc.lineno, "offset": exc.offset, "message": exc.msg}
+            )
+        return json.dumps({"valid": True})
+
+    def run_fixed(command: list[str], timeout: int) -> str:
+        environment = os.environ.copy()
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        try:
+            result = subprocess.run(
+                command,
+                cwd=boundary.root,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+                env=environment,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ToolError(f"The fixed command exceeded its {timeout}-second timeout.") from exc
+        except OSError as exc:
+            raise ToolError("The fixed command could not be started.") from exc
+        output = (result.stdout + result.stderr).strip()
+        truncated = len(output) > MAX_COMMAND_OUTPUT
+        return json.dumps(
+            {
+                "exit_code": result.returncode,
+                "output": output[:MAX_COMMAND_OUTPUT],
+                "truncated": truncated,
+            }
+        )
+
+    def git_diff(arguments: Mapping[str, Any]) -> str:
+        command = ["git", "-c", f"safe.directory={boundary.root.as_posix()}", "diff"]
+        if bool(arguments.get("staged", False)):
+            command.append("--cached")
+        if "path" in arguments:
+            path = boundary.resolve(str(arguments["path"]))
+            command.extend(["--", path.relative_to(boundary.root).as_posix()])
+        return run_fixed(command, 15)
+
+    def git_log(arguments: Mapping[str, Any]) -> str:
+        count = int(arguments.get("max_count", 10))
+        if not 1 <= count <= 50:
+            raise ToolError("max_count must be between 1 and 50.")
+        return run_fixed(
+            [
+                "git",
+                "-c",
+                f"safe.directory={boundary.root.as_posix()}",
+                "log",
+                "--oneline",
+                "--decorate",
+                "-n",
+                str(count),
+            ],
+            15,
+        )
+
+    def lint_project(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        return run_fixed([sys.executable, "-m", "ruff", "check", "--no-cache", "."], 60)
+
+    def test_project(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        return run_fixed([sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120)
+
+    registry.register(
+        ToolSpec(
+            name="list_files",
+            description="List files inside the authorized Ato workspace.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative directory path."},
+                    "recursive": {"type": "boolean", "description": "List recursively."},
+                },
+                "additionalProperties": False,
+            },
+            handler=list_files,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="read_text_file",
+            description="Read a small UTF-8 text file inside the authorized Ato workspace.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "description": "Relative file path."}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=read_text_file,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="git_status",
+            description="Show the read-only Git status of the authorized Ato workspace.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=git_status,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_files",
+            description="Search text files inside the workspace for a literal string.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "path": {"type": "string"},
+                    "case_sensitive": {"type": "boolean"},
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+            handler=search_files,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="python_syntax_check",
+            description="Parse one Python file without executing it and report syntax errors.",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=python_syntax_check,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="git_diff",
+            description=(
+                "Show an unstaged or staged Git diff, optionally limited to one workspace path."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"staged": {"type": "boolean"}, "path": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            handler=git_diff,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="git_log",
+            description="Show a bounded, concise Git commit history.",
+            parameters={
+                "type": "object",
+                "properties": {"max_count": {"type": "integer"}},
+                "additionalProperties": False,
+            },
+            handler=git_log,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="lint_project",
+            description=(
+                "Run the fixed Ruff lint command. Requires confirmation and cannot "
+                "accept command arguments."
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=lint_project,
+            permission=PermissionLevel.MEDIUM,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="test_project",
+            description=(
+                "Run the fixed pytest command. Requires confirmation because tests "
+                "execute repository code."
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=test_project,
+            permission=PermissionLevel.HIGH,
+        )
+    )
+    return registry
