@@ -97,3 +97,28 @@ def test_successful_tool_audit_redacts_secrets_and_limits_results(tmp_path) -> N
     assert event["result"]["status"] == "success"
     assert event["result"]["characters"] == 3_000
     assert len(event["result"]["sha256"]) == 64
+
+
+def test_audit_summarizes_write_payloads_and_sanitizes_other_strings(tmp_path) -> None:
+    audit_path = tmp_path / "audit.jsonl"
+    logger = AuditLogger(audit_path)
+    content = "code with api_key=must-not-be-logged"
+
+    logger.record(
+        user_request="write it",
+        tool_name="create_text_file",
+        arguments={"path": "note.txt", "content": content, "note": "token=hidden"},
+        permission=PermissionLevel.HIGH,
+        decision=PermissionDecision.ALLOW,
+        result="created",
+    )
+
+    event = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert event["arguments"]["content"]["characters"] == len(content)
+    assert len(event["arguments"]["content"]["sha256"]) == 64
+    assert "must-not-be-logged" not in audit_path.read_text(encoding="utf-8")
+    assert "hidden" not in audit_path.read_text(encoding="utf-8")
+
+    confirmation = AuditLogger.confirmation_view({"path": "note.txt", "content": content})
+    assert confirmation["content"]["characters"] == len(content)
+    assert "must-not-be-logged" not in confirmation["content"]["preview"]

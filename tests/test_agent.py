@@ -72,7 +72,8 @@ def test_agent_restores_history_and_can_clear_it() -> None:
 def test_system_prompt_explains_restored_cross_session_context() -> None:
     assert "local persistent memory" in SYSTEM_PROMPT
     assert "Do not claim that you lack cross-session memory" in SYSTEM_PROMPT
-    assert "approved read-only tools" in SYSTEM_PROMPT
+    assert "approved tools" in SYSTEM_PROMPT
+    assert "require explicit user confirmation" in SYSTEM_PROMPT
 
 
 def test_streaming_agent_commits_only_completed_responses() -> None:
