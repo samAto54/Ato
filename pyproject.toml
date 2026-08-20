@@ -27,6 +27,7 @@ packages = ["src/ato"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+markers = ["live_network: opt-in tests that make real external HTTPS requests"]
 
 [tool.ruff]
 line-length = 100

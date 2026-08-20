@@ -155,6 +155,18 @@ Redirects are not followed because each destination requires separate approval. 
 must be uncompressed HTML or plain text and stay within fixed timeout, byte, and output limits.
 Every permission decision and execution result uses Ato's existing audit pipeline.
 
+The default test suite never makes network requests. To exercise the real TLS, DNS, response,
+and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
+
+```powershell
+$env:ATO_RUN_LIVE_WEB_TESTS="1"
+python -m pytest tests/test_web_live.py -m live_network -v
+Remove-Item Env:ATO_RUN_LIVE_WEB_TESTS
+```
+
+The environment variable acts as an intentional network-test switch. Without it, the live test
+is skipped and normal offline verification remains deterministic.
+
 ## Architecture
 
 ```text
