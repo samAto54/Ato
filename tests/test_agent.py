@@ -4,6 +4,7 @@ import pytest
 
 from ato.brain.agent import Agent
 from ato.brain.messages import Message, Role
+from ato.brain.prompts import SYSTEM_PROMPT
 
 
 class FakeLLM:
@@ -60,3 +61,8 @@ def test_agent_restores_history_and_can_clear_it() -> None:
     agent.clear_conversation()
     assert len(agent.messages) == 1
     assert agent.conversation == ()
+
+
+def test_system_prompt_explains_restored_cross_session_context() -> None:
+    assert "local persistent memory" in SYSTEM_PROMPT
+    assert "Do not claim that you lack cross-session memory" in SYSTEM_PROMPT
