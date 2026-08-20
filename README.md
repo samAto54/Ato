@@ -17,6 +17,7 @@ The current Phase 4 build provides:
 - Explicit SQLite long-term facts with bounded relevance retrieval
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
+- Injection-resistant JSON retrieval context with source-label citation instructions
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -187,6 +188,9 @@ secrets are rejected. Image-only/scanned PDF OCR, embeddings, and external vecto
 remain future additions.
 Ingestion requires confirmation that relevant excerpts may be sent to the configured
 model provider during future questions; cancelling leaves the knowledge base unchanged.
+Retrieved excerpts are passed to the model as explicitly untrusted JSON data rather than
+instructions. When Ato relies on a knowledge excerpt, it is instructed to include its exact
+local label, such as `[knowledge guide.md#0]`, and to avoid unsupported citations.
 
 The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments are
 reassembled and validated before execution, and tool results remain subject to the
