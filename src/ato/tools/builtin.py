@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ MAX_TEXT_BYTES = 100_000
 MAX_SEARCH_FILES = 500
 MAX_SEARCH_RESULTS = 100
 MAX_COMMAND_OUTPUT = 50_000
+MAX_WRITE_BYTES = 100_000
+PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
+PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
 
 class WorkspaceBoundary:
@@ -49,13 +53,36 @@ class WorkspaceBoundary:
             return False
         return True
 
+    def write_target(self, relative_path: str) -> Path:
+        """Resolve a non-symlink write target and reject protected locations."""
+        requested = Path(relative_path)
+        if requested.is_absolute():
+            raise ToolError("Tool paths must be relative to the authorized workspace.")
+        unresolved = self.root / requested
+        if unresolved.is_symlink():
+            raise ToolError("Writing through symbolic links is not allowed.")
+        target = unresolved.resolve()
+        try:
+            relative = target.relative_to(self.root)
+        except ValueError as exc:
+            raise ToolError("Requested path is outside the authorized workspace.") from exc
+        lowered_parts = {part.casefold() for part in relative.parts}
+        filename = relative.name.casefold()
+        if lowered_parts & PROTECTED_WRITE_DIRECTORIES:
+            raise ToolError("Writing to a protected workspace directory is not allowed.")
+        if filename == ".env" or filename.startswith(".env."):
+            raise ToolError("Environment files cannot be modified by tools.")
+        if target.suffix.casefold() in PROTECTED_WRITE_SUFFIXES:
+            raise ToolError("Credential and private-key files cannot be modified by tools.")
+        return target
 
-def build_read_only_registry(
+
+def build_phase3_registry(
     workspace_root: Path,
     permission_manager: PermissionManager | None = None,
     audit_logger: AuditLogger | None = None,
 ) -> ToolRegistry:
-    """Create the Phase 3 inspection registry with no arbitrary command access."""
+    """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
     registry = ToolRegistry(permission_manager, audit_logger)
 
@@ -238,6 +265,56 @@ def build_read_only_registry(
         del arguments
         return run_fixed([sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120)
 
+    def create_text_file(arguments: Mapping[str, Any]) -> str:
+        path = boundary.write_target(str(arguments["path"]))
+        content = str(arguments["content"])
+        encoded = content.encode("utf-8")
+        if len(encoded) > MAX_WRITE_BYTES:
+            raise ToolError(f"Content exceeds the {MAX_WRITE_BYTES}-byte write limit.")
+        if path.exists():
+            raise ToolError("The requested file already exists; create will not overwrite it.")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_create_text(path, content)
+        except FileExistsError as exc:
+            raise ToolError("The requested file appeared before creation completed.") from exc
+        except OSError as exc:
+            raise ToolError("The text file could not be created.") from exc
+        return json.dumps(
+            {"path": path.relative_to(boundary.root).as_posix(), "bytes": len(encoded)}
+        )
+
+    def replace_text_in_file(arguments: Mapping[str, Any]) -> str:
+        path = boundary.write_target(str(arguments["path"]))
+        old_text = str(arguments["old_text"])
+        new_text = str(arguments["new_text"])
+        if not old_text:
+            raise ToolError("old_text cannot be empty.")
+        if not path.is_file():
+            raise ToolError("The requested replacement path is not an existing file.")
+        try:
+            if path.stat().st_size > MAX_TEXT_BYTES:
+                raise ToolError(f"File exceeds the {MAX_TEXT_BYTES}-byte modification limit.")
+            original = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ToolError("The requested file is not readable UTF-8 text.") from exc
+        except OSError as exc:
+            raise ToolError("The requested file could not be read.") from exc
+        occurrences = original.count(old_text)
+        if occurrences != 1:
+            raise ToolError(f"old_text must match exactly once; found {occurrences} matches.")
+        updated = original.replace(old_text, new_text, 1)
+        encoded = updated.encode("utf-8")
+        if len(encoded) > MAX_WRITE_BYTES:
+            raise ToolError(f"Modified file exceeds the {MAX_WRITE_BYTES}-byte limit.")
+        try:
+            _atomic_replace_text(path, updated)
+        except OSError as exc:
+            raise ToolError("The text file could not be modified atomically.") from exc
+        return json.dumps(
+            {"path": path.relative_to(boundary.root).as_posix(), "bytes": len(encoded)}
+        )
+
     registry.register(
         ToolSpec(
             name="list_files",
@@ -361,4 +438,78 @@ def build_read_only_registry(
             permission=PermissionLevel.HIGH,
         )
     )
+    registry.register(
+        ToolSpec(
+            name="create_text_file",
+            description=(
+                "Create one new UTF-8 text file inside the workspace. Requires HIGH "
+                "confirmation and never overwrites an existing file."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            handler=create_text_file,
+            permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="replace_text_in_file",
+            description=(
+                "Replace one exact unique text block in an existing UTF-8 workspace file. "
+                "Requires HIGH confirmation."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+            handler=replace_text_in_file,
+            permission=PermissionLevel.HIGH,
+        )
+    )
     return registry
+
+
+def _write_temporary_text(path: Path, content: str) -> Path:
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", newline="", dir=path.parent, delete=False
+    )
+    temporary = Path(handle.name)
+    try:
+        with handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def _atomic_create_text(path: Path, content: str) -> None:
+    temporary = _write_temporary_text(path, content)
+    try:
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _atomic_replace_text(path: Path, content: str) -> None:
+    temporary = _write_temporary_text(path, content)
+    try:
+        os.replace(temporary, path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+build_read_only_registry = build_phase3_registry

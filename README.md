@@ -20,6 +20,7 @@ The current Phase 3 build provides:
 - An allowlisted tool registry with validated arguments
 - Bounded tools for file listing/search, text reads, syntax checks, and Git inspection
 - Fixed lint and test runners protected by permission prompts and timeouts
+- Confirmed, atomic tools for new text files and exact unique text replacement
 - Workspace path boundaries and a maximum tool-call limit
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
@@ -31,8 +32,7 @@ The current Phase 3 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-Workspace file-write tools, arbitrary command execution, web research, autonomous workflows,
-voice, GUI, and
+File deletion, arbitrary command execution, web research, autonomous workflows, voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -174,7 +174,7 @@ rules. Invalid or empty provider output raises a controlled `StructuredOutputErr
 
 ## Phase 3 tool safety
 
-The initial tools are deliberately read-only:
+Inspection tools are deliberately read-only:
 
 - `list_files` lists at most 200 files and ignores Git, virtual environments, and caches.
 - `read_text_file` reads UTF-8 files up to 100,000 bytes inside the workspace.
@@ -185,10 +185,18 @@ The initial tools are deliberately read-only:
 - `lint_project` runs only Ruff and requires `MEDIUM` permission.
 - `test_project` runs only pytest and requires `HIGH` permission because tests execute code.
 
+The first editing tools are deliberately narrow:
+
+- `create_text_file` creates a new UTF-8 file and refuses to overwrite existing files.
+- `replace_text_in_file` changes one exact text block only when it has a unique match.
+- Both require `HIGH` confirmation, use atomic writes, and cap files at 100,000 bytes.
+- Environment, credential, private-key, Git metadata, CI workflow, runtime data, symlink,
+  and out-of-workspace targets are rejected.
+
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. Lint and test execution accepts no command
 arguments, runs without a shell, and has strict time and output limits. There is no
-general shell, workspace write/delete, or arbitrary Python-execution capability.
+general shell, file deletion, unrestricted overwrite, or arbitrary Python-execution capability.
 
 Every tool has a permission level:
 
@@ -198,4 +206,5 @@ Every tool has a permission level:
 
 Audit events are appended to `data/audit.jsonl` with the time, sanitized user request,
 tool, redacted arguments, permission level, decision, and a result length and SHA-256
-digest. Raw tool results are not copied into the audit log.
+digest. Raw tool results and file payloads are not copied into the audit log. Write
+confirmations show only bounded, secret-sanitized previews plus content hashes.

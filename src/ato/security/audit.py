@@ -15,6 +15,8 @@ from ato.security.permissions import PermissionDecision, PermissionLevel
 
 MAX_AUDIT_TEXT = 2_000
 SENSITIVE_KEY_PARTS = ("api_key", "authorization", "password", "secret", "token")
+CONTENT_ARGUMENT_KEYS = {"content", "old_text", "new_text"}
+MAX_CONFIRMATION_PREVIEW = 500
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]{8,}"),
     re.compile(r"(?i)(bearer\s+)[^\s]+"),
@@ -66,16 +68,29 @@ class AuditLogger:
     def redact(cls, value: Any, key: str = "") -> Any:
         if any(part in key.lower() for part in SENSITIVE_KEY_PARTS):
             return "[REDACTED]"
+        if key.lower() in CONTENT_ARGUMENT_KEYS and isinstance(value, str):
+            return cls._summarize_text(value)
         if isinstance(value, dict):
             return {
-                str(item_key): cls.redact(item, str(item_key))
-                for item_key, item in value.items()
+                str(item_key): cls.redact(item, str(item_key)) for item_key, item in value.items()
             }
         if isinstance(value, list):
             return [cls.redact(item) for item in value]
         if isinstance(value, str):
-            return cls._truncate(value)
+            return cls._sanitize_text(value)
         return value
+
+    @classmethod
+    def confirmation_view(cls, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Return sanitized arguments with bounded previews for user confirmation."""
+        viewed = cls.redact(dict(arguments))
+        for key in CONTENT_ARGUMENT_KEYS & set(arguments):
+            value = arguments[key]
+            if isinstance(value, str):
+                summary = cls._summarize_text(value)
+                summary["preview"] = cls._sanitize_text(value[:MAX_CONFIRMATION_PREVIEW])
+                viewed[key] = summary
+        return viewed
 
     @staticmethod
     def _truncate(value: str | None) -> str | None:
@@ -101,3 +116,10 @@ class AuditLogger:
             return None
         digest = hashlib.sha256(result.encode("utf-8")).hexdigest()
         return {"status": "success", "characters": len(result), "sha256": digest}
+
+    @staticmethod
+    def _summarize_text(value: str) -> dict[str, Any]:
+        return {
+            "characters": len(value),
+            "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+        }

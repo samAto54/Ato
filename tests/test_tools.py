@@ -6,7 +6,7 @@ import pytest
 
 from ato.exceptions import ToolError
 from ato.security.permissions import PermissionManager
-from ato.tools import ToolRegistry, ToolSpec, build_read_only_registry
+from ato.tools import ToolRegistry, ToolSpec, build_phase3_registry, build_read_only_registry
 
 
 def test_registry_rejects_unknown_and_invalid_arguments() -> None:
@@ -110,3 +110,47 @@ def test_fixed_analysis_commands_and_permissions(
         denied.execute("lint_project", {})
     with pytest.raises(ToolError, match="Permission denied"):
         denied.execute("test_project", {})
+
+
+def test_controlled_text_writes_require_permission_and_never_overwrite(tmp_path: Path) -> None:
+    denied = build_phase3_registry(tmp_path)
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied.execute("create_text_file", {"path": "new.txt", "content": "hello"})
+    assert not (tmp_path / "new.txt").exists()
+
+    allowed = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+    result = json.loads(
+        allowed.execute("create_text_file", {"path": "notes/new.txt", "content": "hello"})
+    )
+    assert result == {"path": "notes/new.txt", "bytes": 5}
+    assert (tmp_path / "notes" / "new.txt").read_text(encoding="utf-8") == "hello"
+
+    with pytest.raises(ToolError, match="will not overwrite"):
+        allowed.execute("create_text_file", {"path": "notes/new.txt", "content": "changed"})
+    assert (tmp_path / "notes" / "new.txt").read_text(encoding="utf-8") == "hello"
+
+
+def test_controlled_replace_requires_one_exact_match(tmp_path: Path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\nkeep\n", encoding="utf-8")
+    registry = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+
+    registry.execute(
+        "replace_text_in_file",
+        {"path": "module.py", "old_text": "old", "new_text": "new"},
+    )
+    assert path.read_text(encoding="utf-8") == "new\nkeep\n"
+
+    with pytest.raises(ToolError, match="found 0"):
+        registry.execute(
+            "replace_text_in_file",
+            {"path": "module.py", "old_text": "missing", "new_text": "x"},
+        )
+
+
+@pytest.mark.parametrize("path", [".env", "data/memory.json", ".github/workflow.yml", "key.pem"])
+def test_controlled_writes_reject_protected_targets(tmp_path: Path, path: str) -> None:
+    registry = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+
+    with pytest.raises(ToolError, match="cannot|protected|Credential"):
+        registry.execute("create_text_file", {"path": path, "content": "unsafe"})

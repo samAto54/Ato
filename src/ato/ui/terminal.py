@@ -13,7 +13,7 @@ from ato.exceptions import AtoError
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
-from ato.tools import build_read_only_registry
+from ato.tools import build_phase3_registry
 
 EXIT_COMMANDS = {"exit", "quit"}
 CLEAR_MEMORY_COMMAND = "/clear-memory"
@@ -24,7 +24,7 @@ FORGET_PREFIX = "/forget "
 
 def confirm_tool(request: PermissionRequest) -> bool:
     """Ask the terminal user to approve a protected tool invocation."""
-    safe_arguments = AuditLogger.redact(dict(request.arguments))
+    safe_arguments = AuditLogger.confirmation_view(request.arguments)
     print("\nAto requests permission:")
     print(f"  Tool: {request.tool_name}")
     print(f"  Permission: {request.level.value}")
@@ -168,7 +168,7 @@ def main() -> None:
         )
         memory_context = memory_store.load_context()
         long_term_memory = SqliteLongTermMemory(settings.long_term_memory_file)
-        tool_registry = build_read_only_registry(
+        tool_registry = build_phase3_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
             audit_logger=AuditLogger(settings.audit_file),
