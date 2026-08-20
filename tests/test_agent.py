@@ -74,6 +74,7 @@ def test_system_prompt_explains_restored_cross_session_context() -> None:
     assert "Do not claim that you lack cross-session memory" in SYSTEM_PROMPT
     assert "approved tools" in SYSTEM_PROMPT
     assert "require explicit user confirmation" in SYSTEM_PROMPT
+    assert "CRITICAL confirmation" in SYSTEM_PROMPT
 
 
 def test_streaming_agent_commits_only_completed_responses() -> None:

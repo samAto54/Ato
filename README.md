@@ -21,6 +21,7 @@ The current Phase 3 build provides:
 - Bounded tools for file listing/search, text reads, syntax checks, and Git inspection
 - Fixed lint and test runners protected by permission prompts and timeouts
 - Confirmed, atomic tools for new text files and exact unique text replacement
+- CRITICAL-confirmation file trashing with a reported recovery path
 - Workspace path boundaries and a maximum tool-call limit
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
@@ -32,7 +33,8 @@ The current Phase 3 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-File deletion, arbitrary command execution, web research, autonomous workflows, voice, GUI, and
+Permanent/recursive deletion, arbitrary command execution, web research, autonomous workflows,
+voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -192,11 +194,14 @@ The first editing tools are deliberately narrow:
 - Both require `HIGH` confirmation, use atomic writes, and cap files at 100,000 bytes.
 - Environment, credential, private-key, Git metadata, CI workflow, runtime data, symlink,
   and out-of-workspace targets are rejected.
+- `trash_text_file` moves one small UTF-8 file into ignored `data/trash/` storage after
+  `CRITICAL` confirmation and returns its recovery path. It never deletes directories.
 
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. Lint and test execution accepts no command
 arguments, runs without a shell, and has strict time and output limits. There is no
-general shell, file deletion, unrestricted overwrite, or arbitrary Python-execution capability.
+general shell, recursive/permanent deletion, unrestricted overwrite, or arbitrary
+Python-execution capability.
 
 Every tool has a permission level:
 
