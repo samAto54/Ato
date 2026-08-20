@@ -154,3 +154,38 @@ def test_controlled_writes_reject_protected_targets(tmp_path: Path, path: str) -
 
     with pytest.raises(ToolError, match="cannot|protected|Credential"):
         registry.execute("create_text_file", {"path": path, "content": "unsafe"})
+
+
+def test_trash_text_file_is_critical_confirmed_and_recoverable(tmp_path: Path) -> None:
+    source = tmp_path / "obsolete.txt"
+    source.write_text("recover me", encoding="utf-8")
+    seen = []
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: not seen.append(request)),
+    )
+
+    result = json.loads(registry.execute("trash_text_file", {"path": "obsolete.txt"}))
+
+    assert seen[0].level.value == "CRITICAL"
+    assert result["original_path"] == "obsolete.txt"
+    recovery = tmp_path / Path(result["recovery_path"])
+    assert not source.exists()
+    assert recovery.read_text(encoding="utf-8") == "recover me"
+
+
+def test_trash_text_file_denial_and_target_guards(tmp_path: Path) -> None:
+    source = tmp_path / "keep.txt"
+    source.write_text("keep me", encoding="utf-8")
+    denied = build_phase3_registry(tmp_path, PermissionManager(lambda request: False))
+
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied.execute("trash_text_file", {"path": "keep.txt"})
+    assert source.exists()
+
+    allowed = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+    (tmp_path / "folder").mkdir()
+    with pytest.raises(ToolError, match="regular file"):
+        allowed.execute("trash_text_file", {"path": "folder"})
+    with pytest.raises(ToolError, match="protected"):
+        allowed.execute("trash_text_file", {"path": "data/memory.json"})

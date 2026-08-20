@@ -1,4 +1,4 @@
-"""Read-only tools constrained to an authorized workspace root."""
+"""Bounded tools constrained to an authorized workspace root."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ato.exceptions import ToolError
 from ato.security.audit import AuditLogger
@@ -315,6 +317,34 @@ def build_phase3_registry(
             {"path": path.relative_to(boundary.root).as_posix(), "bytes": len(encoded)}
         )
 
+    def trash_text_file(arguments: Mapping[str, Any]) -> str:
+        path = boundary.write_target(str(arguments["path"]))
+        if not path.is_file():
+            raise ToolError("Only an existing regular file can be moved to trash.")
+        try:
+            if path.stat().st_size > MAX_TEXT_BYTES:
+                raise ToolError(f"File exceeds the {MAX_TEXT_BYTES}-byte trash limit.")
+            path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise ToolError("Only readable UTF-8 text files can be moved to trash.") from exc
+        except OSError as exc:
+            raise ToolError("The requested file could not be inspected.") from exc
+        trash_directory = boundary.root / "data" / "trash"
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        trash_name = f"{timestamp}_{uuid4().hex}_{path.name}"
+        trash_path = trash_directory / trash_name
+        try:
+            trash_directory.mkdir(parents=True, exist_ok=True)
+            os.replace(path, trash_path)
+        except OSError as exc:
+            raise ToolError("The file could not be moved to Ato's local trash.") from exc
+        return json.dumps(
+            {
+                "original_path": path.relative_to(boundary.root).as_posix(),
+                "recovery_path": trash_path.relative_to(boundary.root).as_posix(),
+            }
+        )
+
     registry.register(
         ToolSpec(
             name="list_files",
@@ -474,6 +504,23 @@ def build_phase3_registry(
             },
             handler=replace_text_in_file,
             permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="trash_text_file",
+            description=(
+                "Move one small UTF-8 workspace file to Ato's recoverable local trash. "
+                "Requires CRITICAL confirmation and never deletes directories."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+            handler=trash_text_file,
+            permission=PermissionLevel.CRITICAL,
         )
     )
     return registry
