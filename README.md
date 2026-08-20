@@ -9,6 +9,7 @@ chatbots.
 The current Phase 3 build provides:
 
 - An interactive terminal conversation
+- Incremental streaming responses in the terminal
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -23,6 +24,7 @@ The current Phase 3 build provides:
 - Redacted append-only JSONL audit logging for every tool execution decision
 - A provider-neutral `LLMClient` interface
 - A DeepSeek provider using its OpenAI-compatible chat API
+- Streaming tool-call reconstruction with the same execution and permission limits
 - Environment-based configuration with no hard-coded secrets
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
@@ -146,6 +148,11 @@ exceeds the configured budget, older turns are converted into a bounded, labelle
 summary while recent turns remain verbatim. The summary is stored separately in the
 version-2 memory format and injected as context, never as a fabricated assistant reply.
 Existing version-1 memory files migrate automatically when next saved.
+
+The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments are
+reassembled and validated before execution, and tool results remain subject to the
+same permissions and audit controls. A conversation turn is persisted only after the
+entire stream completes successfully; partial or failed streams do not enter memory.
 
 ## Phase 3 tool safety
 

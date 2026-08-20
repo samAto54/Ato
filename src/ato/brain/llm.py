@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Protocol
 
 from ato.brain.messages import Message
@@ -18,4 +18,16 @@ class LLMClient(Protocol):
         tools: ToolRegistry | None = None,
     ) -> str:
         """Generate a response from an ordered conversation."""
+        ...
+
+
+class StreamingLLMClient(LLMClient, Protocol):
+    """Optional provider capability for incremental text delivery."""
+
+    def stream(
+        self,
+        messages: Sequence[Message],
+        tools: ToolRegistry | None = None,
+    ) -> Iterator[str]:
+        """Yield ordered non-empty response fragments."""
         ...
