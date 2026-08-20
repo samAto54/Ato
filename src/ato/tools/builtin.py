@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,7 @@ from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
 from ato.tools.system import collect_system_info
+from ato.tools.web import fetch_web_page
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 MAX_LIST_RESULTS = 200
@@ -86,10 +87,12 @@ def build_phase3_registry(
     workspace_root: Path,
     permission_manager: PermissionManager | None = None,
     audit_logger: AuditLogger | None = None,
+    web_fetcher: Callable[[str], str] | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
     registry = ToolRegistry(permission_manager, audit_logger)
+    approved_web_fetcher = web_fetcher or fetch_web_page
 
     def list_files(arguments: Mapping[str, Any]) -> str:
         directory = boundary.resolve(str(arguments.get("path", ".")))
@@ -341,6 +344,9 @@ def build_phase3_registry(
         except OSError as exc:
             raise ToolError("System capacity information could not be collected.") from exc
 
+    def fetch_page(arguments: Mapping[str, Any]) -> str:
+        return approved_web_fetcher(str(arguments["url"]))
+
     def create_text_file(arguments: Mapping[str, Any]) -> str:
         path = boundary.write_target(str(arguments["path"]))
         content = str(arguments["content"])
@@ -581,6 +587,23 @@ def build_phase3_registry(
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=system_info,
             permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="fetch_web_page",
+            description=(
+                "Fetch readable text from one explicitly approved public HTTPS page. "
+                "Blocks private networks and redirects and enforces strict size and timeout limits."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"url": {"type": "string"}},
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+            handler=fetch_page,
+            permission=PermissionLevel.MEDIUM,
         )
     )
     registry.register(
