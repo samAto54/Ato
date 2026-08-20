@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 from docx import Document
 from pypdf import PdfWriter
@@ -106,3 +108,44 @@ def test_knowledge_rejects_corrupt_binary_documents(tmp_path, filename: str) -> 
 
     with pytest.raises(MemoryStoreError, match="could not be extracted"):
         store.ingest(filename)
+
+
+def test_knowledge_fts_ranks_more_relevant_chunks_first(tmp_path) -> None:
+    (tmp_path / "brief.txt").write_text("Mars mission overview.", encoding="utf-8")
+    (tmp_path / "detailed.txt").write_text(
+        "Mars mission launch plan. Mars mission crew. Mars mission science goals.",
+        encoding="utf-8",
+    )
+    store = SqliteKnowledgeStore(tmp_path / "knowledge.db", tmp_path)
+    store.ingest("brief.txt")
+    store.ingest("detailed.txt")
+
+    results = store.search("Mars mission launch")
+
+    assert results
+    assert "launch plan" in results[0].content
+
+
+def test_knowledge_migrates_existing_chunks_into_fts_index(tmp_path) -> None:
+    database = tmp_path / "knowledge.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, "
+            "sha256 TEXT NOT NULL, updated_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE chunks (id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL "
+            "REFERENCES documents(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, "
+            "content TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO documents VALUES (1, 'legacy.txt', 'digest', 'timestamp')"
+        )
+        connection.execute(
+            "INSERT INTO chunks VALUES (1, 1, 0, 'Legacy orbital mechanics handbook')"
+        )
+
+    store = SqliteKnowledgeStore(database, tmp_path)
+
+    results = store.search("orbital mechanics")
+    assert results and results[0].source == "knowledge legacy.txt#0"
