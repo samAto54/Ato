@@ -13,6 +13,10 @@ class LLMError(AtoError):
     """Raised when a language model provider cannot produce a response."""
 
 
+class StructuredOutputError(LLMError):
+    """Raised when a structured LLM response is invalid or violates its schema."""
+
+
 class MemoryStoreError(AtoError):
     """Raised when persistent memory cannot be read, written, or cleared."""
 
