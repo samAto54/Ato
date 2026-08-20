@@ -19,6 +19,7 @@ The current Phase 4 build provides:
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
 - Confirmed, bounded public HTTPS page fetching with readable-text extraction
+- Injection-resistant external evidence labels and exact-URL citation instructions
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -154,6 +155,9 @@ and refuses localhost, private, link-local, reserved, credential-bearing, and no
 Redirects are not followed because each destination requires separate approval. Responses
 must be uncompressed HTML or plain text and stay within fixed timeout, byte, and output limits.
 Every permission decision and execution result uses Ato's existing audit pipeline.
+Fetched results include an exact `source_url` and an `untrusted_external` trust label. Ato's
+system policy treats all webpage text as evidence rather than instructions, ignores action
+requests embedded in pages, and requires the exact URL when an answer relies on that evidence.
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
