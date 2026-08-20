@@ -261,3 +261,24 @@ def test_git_commit_files_fails_closed_without_confirmation(tmp_path: Path) -> N
             "git_commit_files",
             {"paths": ["file.txt"], "message": "No permission"},
         )
+
+
+def test_system_info_is_read_only_and_omits_host_identity(tmp_path: Path) -> None:
+    registry = build_phase3_registry(tmp_path)
+
+    result = json.loads(registry.execute("system_info", {}))
+
+    assert set(result) == {
+        "os",
+        "python",
+        "cpu",
+        "memory_bytes",
+        "workspace_disk_bytes",
+        "network",
+    }
+    assert result["workspace_disk_bytes"]["total"] > 0
+    assert result["workspace_disk_bytes"]["free"] >= 0
+    assert result["network"]["status"] == "not_probed"
+    serialized = json.dumps(result).casefold()
+    assert "hostname" not in serialized
+    assert "username" not in serialized

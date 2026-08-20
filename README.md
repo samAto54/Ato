@@ -23,6 +23,7 @@ The current Phase 3 build provides:
 - Confirmed, atomic tools for new text files and exact unique text replacement
 - CRITICAL-confirmation file trashing with a reported recovery path
 - Read-only local branch inspection and HIGH-confirmation path-scoped Git commits
+- Privacy-conscious read-only OS, CPU, RAM, Python, and workspace-disk information
 - Workspace path boundaries and a maximum tool-call limit
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
@@ -201,6 +202,8 @@ The first editing tools are deliberately narrow:
 - `git_commit_files` creates a local commit for 1-20 explicit, non-protected paths after
   `HIGH` confirmation. It uses fixed `git commit --only` arguments, caps one-line commit
   messages at 200 characters, and preserves unrelated staged changes.
+- `system_info` reports non-identifying host capacity information. It omits usernames and
+  hostnames and labels network state as `not_probed` rather than making outbound requests.
 
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. Lint and test execution accepts no command

@@ -18,6 +18,7 @@ from ato.exceptions import ToolError
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
+from ato.tools.system import collect_system_info
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 MAX_LIST_RESULTS = 200
@@ -333,6 +334,13 @@ def build_phase3_registry(
         del arguments
         return run_fixed([sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120)
 
+    def system_info(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        try:
+            return json.dumps(collect_system_info(boundary.root))
+        except OSError as exc:
+            raise ToolError("System capacity information could not be collected.") from exc
+
     def create_text_file(arguments: Mapping[str, Any]) -> str:
         path = boundary.write_target(str(arguments["path"]))
         content = str(arguments["content"])
@@ -561,6 +569,18 @@ def build_phase3_registry(
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=test_project,
             permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="system_info",
+            description=(
+                "Report non-identifying OS, CPU, RAM, Python, and workspace-disk capacity "
+                "without probing the network."
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=system_info,
+            permission=PermissionLevel.LOW,
         )
     )
     registry.register(
