@@ -1,9 +1,11 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from ato.exceptions import ToolError
+from ato.security.permissions import PermissionManager
 from ato.tools import ToolRegistry, ToolSpec, build_read_only_registry
 
 
@@ -58,3 +60,53 @@ def test_list_files_ignores_internal_directories(tmp_path: Path) -> None:
     result = json.loads(registry.execute("list_files", {}))
 
     assert result["files"] == ["src/main.py"]
+
+
+def test_search_and_syntax_tools_are_bounded_and_non_executing(tmp_path: Path) -> None:
+    (tmp_path / "src").mkdir()
+    marker = tmp_path / "executed.txt"
+    (tmp_path / "src" / "main.py").write_text(
+        f"# Ato Agent\nopen({str(marker)!r}, 'w').write('bad')\n", encoding="utf-8"
+    )
+    (tmp_path / "invalid.py").write_text("def broken(:\n", encoding="utf-8")
+    registry = build_read_only_registry(tmp_path)
+
+    search = json.loads(registry.execute("search_files", {"query": "ATO AGENT"}))
+    assert search["matches"][0]["path"] == "src/main.py"
+    assert json.loads(registry.execute("python_syntax_check", {"path": "src/main.py"})) == {
+        "valid": True
+    }
+    assert (
+        json.loads(registry.execute("python_syntax_check", {"path": "invalid.py"}))["valid"]
+        is False
+    )
+    assert not marker.exists()
+
+
+def test_fixed_analysis_commands_and_permissions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["cwd"] == tmp_path.resolve()
+        return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    registry = build_read_only_registry(tmp_path, PermissionManager(lambda request: True))
+    registry.execute("git_diff", {"staged": True})
+    registry.execute("git_log", {"max_count": 5})
+    registry.execute("lint_project", {})
+    registry.execute("test_project", {})
+
+    assert calls[0][-2:] == ["diff", "--cached"]
+    assert calls[1][-5:] == ["log", "--oneline", "--decorate", "-n", "5"]
+    assert calls[2][-5:] == ["-m", "ruff", "check", "--no-cache", "."]
+    assert calls[3][-4:] == ["-m", "pytest", "-p", "no:cacheprovider"]
+
+    denied = build_read_only_registry(tmp_path)
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied.execute("lint_project", {})
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied.execute("test_project", {})

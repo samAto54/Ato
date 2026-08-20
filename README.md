@@ -14,7 +14,8 @@ The current Phase 3 build provides:
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
-- Read-only tools for listing files, reading small text files, and checking Git status
+- Bounded tools for file listing/search, text reads, syntax checks, and Git inspection
+- Fixed lint and test runners protected by permission prompts and timeouts
 - Workspace path boundaries and a maximum tool-call limit
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
@@ -24,7 +25,7 @@ The current Phase 3 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-File writes, code execution, web research, autonomous workflows, voice, GUI, and
+File writes, arbitrary command execution, web research, autonomous workflows, voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -142,10 +143,16 @@ The initial tools are deliberately read-only:
 - `list_files` lists at most 200 files and ignores Git, virtual environments, and caches.
 - `read_text_file` reads UTF-8 files up to 100,000 bytes inside the workspace.
 - `git_status` runs only the fixed read-only Git status command.
+- `search_files` performs literal search across at most 500 small files and returns at most 100 matches.
+- `python_syntax_check` parses one `.py` file without executing it.
+- `git_diff` and `git_log` use fixed commands, timeouts, and capped output.
+- `lint_project` runs only Ruff and requires `MEDIUM` permission.
+- `test_project` runs only pytest and requires `HIGH` permission because tests execute code.
 
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
-and arguments and performs the operation. There is no general shell, write, delete,
-or Python-execution capability in this Phase 3 foundation.
+and arguments and performs the operation. Lint and test execution accepts no command
+arguments, runs without a shell, and has strict time and output limits. There is no
+general shell, write, delete, or arbitrary Python-execution capability.
 
 Every tool has a permission level:
 
