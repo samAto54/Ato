@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 3 build provides:
+The current Phase 4 build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -15,7 +15,7 @@ The current Phase 3 build provides:
 - Configurable context budgeting with deterministic compaction of older turns
 - Persisted summaries with recent messages retained verbatim
 - Explicit SQLite long-term facts with bounded relevance retrieval
-- Local document ingestion and retrieval for text, Markdown, CSV, and source code
+- Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -50,6 +50,7 @@ ideas can be migrated during the appropriate phases without destabilizing Phase 
 ato/
 |-- src/ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
+|   |-- knowledge/      # Local document ingestion, chunking, and retrieval
 |   |-- memory/         # Conversation JSON and durable SQLite fact persistence
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- security/       # Permission decisions, confirmations, and audit logging
@@ -74,8 +75,10 @@ ato/
 
 - Python 3.11 or newer
 - `openai` SDK for DeepSeek's OpenAI-compatible API
+- `pypdf` for bounded PDF text extraction
+- `python-docx` for bounded Word document text and table extraction
 - `python-dotenv` for local environment configuration
-- `pytest` and `ruff` for development checks
+- `pytest`, `reportlab`, and `ruff` for development checks and document fixtures
 
 Runtime dependencies are listed in `requirements.txt`. Complete package and
 development metadata is maintained in `pyproject.toml`.
@@ -168,13 +171,17 @@ API keys, tokens, and secrets are rejected. The SQLite database is local plain t
 is excluded from Git, and should be protected using normal operating-system access controls.
 
 Local RAG is available through `/ingest <workspace-path>`, `/knowledge`, and confirmed
-`/remove-document <id>` commands. The first ingestion phase accepts UTF-8 TXT, Markdown,
-CSV, JSON, common source-code, and configuration formats up to 500,000 bytes. Documents
-are chunked into ignored local SQLite storage and retrieved with bounded keyword scoring.
+`/remove-document <id>` commands. Ingestion accepts UTF-8 TXT, Markdown, CSV, JSON,
+common source-code and configuration formats up to 500,000 bytes, plus PDF and DOCX files
+up to 10 MB. PDFs are limited to 200 pages; DOCX archives and all extracted text have
+additional expansion limits. Documents are chunked into ignored local SQLite storage and
+retrieved with bounded keyword scoring. PDF page markers and DOCX table markers are retained
+in extracted text to improve source context.
 Re-ingesting an unchanged document is idempotent; changed documents replace their old
 chunks. Environment files, protected directories, symlinks, unsupported formats, paths
-outside the workspace, and content that appears to contain secrets are rejected. PDF,
-DOCX, embeddings, and external vector databases remain future additions.
+outside the workspace, encrypted or malformed documents, and content that appears to contain
+secrets are rejected. Image-only/scanned PDF OCR, embeddings, and external vector databases
+remain future additions.
 Ingestion requires confirmation that relevant excerpts may be sent to the configured
 model provider during future questions; cancelling leaves the knowledge base unchanged.
 

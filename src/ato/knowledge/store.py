@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sqlite3
+import zipfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +13,12 @@ from pathlib import Path
 from ato.brain.memory import MemoryItem
 from ato.exceptions import MemoryStoreError
 
-MAX_DOCUMENT_BYTES = 500_000
+MAX_TEXT_DOCUMENT_BYTES = 500_000
+MAX_BINARY_DOCUMENT_BYTES = 10_000_000
+MAX_EXTRACTED_CHARS = 500_000
+MAX_PDF_PAGES = 200
+MAX_DOCX_ARCHIVE_BYTES = 20_000_000
+MAX_DOCX_ARCHIVE_ENTRIES = 5_000
 MAX_DOCUMENT_CHUNKS = 500
 MAX_DOCUMENTS = 1_000
 CHUNK_CHARS = 1_500
@@ -37,6 +43,8 @@ SUPPORTED_SUFFIXES = {
     ".sql",
     ".sh",
     ".ps1",
+    ".pdf",
+    ".docx",
 }
 PROTECTED_PARTS = {".git", ".github", ".venv", "data", "__pycache__"}
 WORD_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
@@ -66,21 +74,17 @@ class SqliteKnowledgeStore:
     def ingest(self, relative_path: str) -> DocumentRecord:
         source = self._resolve_source(relative_path)
         try:
-            size = source.stat().st_size
-            if size > MAX_DOCUMENT_BYTES:
-                raise MemoryStoreError(f"Document exceeds the {MAX_DOCUMENT_BYTES}-byte limit.")
-            content = source.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            raise MemoryStoreError("Document must be readable UTF-8 text.") from exc
+            raw_content = source.read_bytes()
         except OSError as exc:
             raise MemoryStoreError("Document could not be read.") from exc
+        content = _extract_content(source, raw_content)
         if SECRET_PATTERN.search(content):
             raise MemoryStoreError("Document appears to contain an API key, token, or secret.")
         chunks = _chunk_text(content)
         if not chunks:
             raise MemoryStoreError("Document contains no ingestible text.")
         relative = source.relative_to(self.workspace_root).as_posix()
-        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(raw_content).hexdigest()
         try:
             with self._connect() as connection:
                 row = connection.execute(
@@ -225,3 +229,78 @@ def _chunk_text(content: str) -> tuple[str, ...]:
             break
         start = max(start + 1, end - CHUNK_OVERLAP)
     return tuple(chunks)
+
+
+def _extract_content(source: Path, raw_content: bytes) -> str:
+    suffix = source.suffix.casefold()
+    size_limit = (
+        MAX_BINARY_DOCUMENT_BYTES if suffix in {".pdf", ".docx"} else MAX_TEXT_DOCUMENT_BYTES
+    )
+    if len(raw_content) > size_limit:
+        raise MemoryStoreError(f"Document exceeds the {size_limit}-byte limit.")
+    if suffix == ".pdf":
+        return _extract_pdf(source)
+    if suffix == ".docx":
+        return _extract_docx(source)
+    try:
+        return raw_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise MemoryStoreError("Document must be readable UTF-8 text.") from exc
+
+
+def _extract_pdf(source: Path) -> str:
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(source)
+        if reader.is_encrypted:
+            raise MemoryStoreError("Encrypted PDF documents cannot be ingested.")
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise MemoryStoreError(f"PDF exceeds the {MAX_PDF_PAGES}-page limit.")
+        sections = []
+        for page_number, page in enumerate(reader.pages, start=1):
+            text = (page.extract_text() or "").strip()
+            if text:
+                sections.append(f"[PDF page {page_number}]\n{text}")
+            if sum(len(section) for section in sections) > MAX_EXTRACTED_CHARS:
+                raise MemoryStoreError("Extracted document text exceeds the safety limit.")
+        return "\n\n".join(sections)
+    except MemoryStoreError:
+        raise
+    except ImportError as exc:
+        raise MemoryStoreError("PDF support requires the pypdf dependency.") from exc
+    except Exception as exc:
+        raise MemoryStoreError("PDF text could not be extracted.") from exc
+
+
+def _extract_docx(source: Path) -> str:
+    try:
+        with zipfile.ZipFile(source) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_DOCX_ARCHIVE_ENTRIES:
+                raise MemoryStoreError("DOCX archive contains too many entries.")
+            if sum(entry.file_size for entry in entries) > MAX_DOCX_ARCHIVE_BYTES:
+                raise MemoryStoreError("DOCX expanded content exceeds the safety limit.")
+
+        from docx import Document
+
+        document = Document(source)
+        sections = [paragraph.text.strip() for paragraph in document.paragraphs]
+        for table_number, table in enumerate(document.tables, start=1):
+            rows = []
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                if any(cells):
+                    rows.append(" | ".join(cells))
+            if rows:
+                sections.append(f"[DOCX table {table_number}]\n" + "\n".join(rows))
+        content = "\n\n".join(section for section in sections if section)
+        if len(content) > MAX_EXTRACTED_CHARS:
+            raise MemoryStoreError("Extracted document text exceeds the safety limit.")
+        return content
+    except MemoryStoreError:
+        raise
+    except ImportError as exc:
+        raise MemoryStoreError("DOCX support requires the python-docx dependency.") from exc
+    except (OSError, zipfile.BadZipFile, ValueError, KeyError) as exc:
+        raise MemoryStoreError("DOCX text could not be extracted.") from exc
