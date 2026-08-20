@@ -14,6 +14,7 @@ The current Phase 3 build provides:
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
 - Persisted summaries with recent messages retained verbatim
+- Explicit SQLite long-term facts with bounded relevance retrieval
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -30,7 +31,8 @@ The current Phase 3 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-File writes, arbitrary command execution, web research, autonomous workflows, voice, GUI, and
+Workspace file-write tools, arbitrary command execution, web research, autonomous workflows,
+voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -43,7 +45,7 @@ ideas can be migrated during the appropriate phases without destabilizing Phase 
 ato/
 |-- src/ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
-|   |-- memory/         # Validated, atomic JSON persistence
+|   |-- memory/         # Conversation JSON and durable SQLite fact persistence
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
@@ -104,6 +106,7 @@ ATO_MEMORY_MAX_MESSAGES=40
 ATO_CONTEXT_MAX_TOKENS=12000
 ATO_CONTEXT_RECENT_MESSAGES=12
 ATO_CONTEXT_SUMMARY_MAX_CHARS=6000
+ATO_LONG_TERM_MEMORY_FILE=data/long_term_memory.db
 ATO_WORKSPACE_ROOT=.
 ATO_AUDIT_FILE=data/audit.jsonl
 ```
@@ -119,6 +122,7 @@ python -m ato
 You can also run the installed `ato` command. Enter `exit` or `quit` to close.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
+This does not remove separately approved long-term facts.
 
 ## Verify the project
 
@@ -150,6 +154,13 @@ summary while recent turns remain verbatim. The summary is stored separately in 
 version-2 memory format and injected as context, never as a fabricated assistant reply.
 Existing version-1 memory files migrate automatically when next saved.
 
+Long-term memory is separate from conversation history. Use `/remember <fact>` to
+save a user-approved fact, `/memories` to list saved facts, and `/forget <id>` to
+delete one after confirmation. Relevant facts are retrieved with bounded local
+keyword matching and injected as data rather than instructions. Likely passwords,
+API keys, tokens, and secrets are rejected. The SQLite database is local plain text,
+is excluded from Git, and should be protected using normal operating-system access controls.
+
 The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments are
 reassembled and validated before execution, and tool results remain subject to the
 same permissions and audit controls. A conversation turn is persisted only after the
@@ -177,7 +188,7 @@ The initial tools are deliberately read-only:
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. Lint and test execution accepts no command
 arguments, runs without a shell, and has strict time and output limits. There is no
-general shell, write, delete, or arbitrary Python-execution capability.
+general shell, workspace write/delete, or arbitrary Python-execution capability.
 
 Every tool has a permission level:
 

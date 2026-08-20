@@ -14,6 +14,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_CONTEXT_MAX_TOKENS", "8000")
     monkeypatch.setenv("ATO_CONTEXT_RECENT_MESSAGES", "10")
     monkeypatch.setenv("ATO_CONTEXT_SUMMARY_MAX_CHARS", "4000")
+    monkeypatch.setenv("ATO_LONG_TERM_MEMORY_FILE", "custom/facts.db")
     settings = Settings.from_env()
     assert settings.deepseek_api_key == "test-key"
     assert settings.model == "test-model"
@@ -24,6 +25,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.context_max_tokens == 8000
     assert settings.context_recent_messages == 10
     assert settings.context_summary_max_chars == 4000
+    assert str(settings.long_term_memory_file) == "custom\\facts.db"
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

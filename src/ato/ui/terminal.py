@@ -10,13 +10,16 @@ from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.config import Settings
 from ato.exceptions import AtoError
-from ato.memory import JsonMemoryStore
+from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_read_only_registry
 
 EXIT_COMMANDS = {"exit", "quit"}
 CLEAR_MEMORY_COMMAND = "/clear-memory"
+LIST_MEMORIES_COMMAND = "/memories"
+REMEMBER_PREFIX = "/remember "
+FORGET_PREFIX = "/forget "
 
 
 def confirm_tool(request: PermissionRequest) -> bool:
@@ -33,12 +36,16 @@ def confirm_tool(request: PermissionRequest) -> bool:
 def run_terminal(
     agent: Agent,
     memory_store: JsonMemoryStore | None = None,
+    long_term_memory: SqliteLongTermMemory | None = None,
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
     write_chunk: Callable[[str], None] | None = None,
 ) -> None:
     """Run the interactive terminal loop for an existing agent."""
-    write("Ato is ready. Type 'exit' or 'quit' to stop. Use /clear-memory to reset history.")
+    write(
+        "Ato is ready. Type 'exit' or 'quit' to stop. Use /clear-memory to reset "
+        "conversation history."
+    )
 
     while True:
         try:
@@ -58,7 +65,61 @@ def run_terminal(
             except AtoError as exc:
                 write(f"Ato error: {exc}")
             else:
-                write("Ato: Persistent conversation memory cleared.")
+                write("Ato: Conversation memory cleared. Long-term facts were preserved.")
+            continue
+        if user_input.lower().startswith(REMEMBER_PREFIX):
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            try:
+                item = long_term_memory.remember(user_input[len(REMEMBER_PREFIX) :])
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write(f"Ato: Remembered as memory {item.id}.")
+            continue
+        if user_input.lower() == REMEMBER_PREFIX.strip():
+            write("Ato error: Use /remember followed by the fact to save.")
+            continue
+        if user_input.lower() == LIST_MEMORIES_COMMAND:
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            try:
+                memories = long_term_memory.list_memories()
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                if memories:
+                    write("Ato long-term memories:")
+                    for item in memories:
+                        write(f"  {item.id}: {item.content}")
+                else:
+                    write("Ato: No long-term memories saved.")
+            continue
+        if user_input.lower().startswith(FORGET_PREFIX):
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            raw_id = user_input[len(FORGET_PREFIX) :].strip()
+            try:
+                memory_id = int(raw_id)
+            except ValueError:
+                write("Ato error: Use /forget followed by a numeric memory ID.")
+                continue
+            confirmation = read(f"Delete long-term memory {memory_id}? [y/N]: ").strip().lower()
+            if confirmation not in {"y", "yes"}:
+                write("Ato: Forget cancelled.")
+                continue
+            try:
+                deleted = long_term_memory.forget(memory_id)
+            except (AtoError, ValueError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Memory forgotten." if deleted else "Ato: Memory ID not found.")
+            continue
+        if user_input.lower() == FORGET_PREFIX.strip():
+            write("Ato error: Use /forget followed by a numeric memory ID.")
             continue
         if not user_input:
             continue
@@ -106,6 +167,7 @@ def main() -> None:
             max_messages=settings.memory_max_messages,
         )
         memory_context = memory_store.load_context()
+        long_term_memory = SqliteLongTermMemory(settings.long_term_memory_file)
         tool_registry = build_read_only_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
@@ -126,7 +188,9 @@ def main() -> None:
                 max_summary_chars=settings.context_summary_max_chars,
                 max_messages=settings.memory_max_messages,
             ),
+            memory_retriever=long_term_memory,
             tools=tool_registry,
         ),
         memory_store=memory_store,
+        long_term_memory=long_term_memory,
     )

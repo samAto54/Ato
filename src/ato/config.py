@@ -24,6 +24,7 @@ class Settings:
     context_max_tokens: int = 12_000
     context_recent_messages: int = 12
     context_summary_max_chars: int = 6_000
+    long_term_memory_file: Path = Path("data/long_term_memory.db")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -38,6 +39,9 @@ class Settings:
         raw_context_tokens = os.getenv("ATO_CONTEXT_MAX_TOKENS", "12000").strip()
         raw_recent_messages = os.getenv("ATO_CONTEXT_RECENT_MESSAGES", "12").strip()
         raw_summary_chars = os.getenv("ATO_CONTEXT_SUMMARY_MAX_CHARS", "6000").strip()
+        long_term_memory_file = Path(
+            os.getenv("ATO_LONG_TERM_MEMORY_FILE", "data/long_term_memory.db").strip()
+        )
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -79,4 +83,5 @@ class Settings:
             context_max_tokens=context_tokens,
             context_recent_messages=recent_messages,
             context_summary_max_chars=summary_chars,
+            long_term_memory_file=long_term_memory_file,
         )

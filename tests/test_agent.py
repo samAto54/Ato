@@ -3,6 +3,7 @@ from collections.abc import Sequence
 import pytest
 
 from ato.brain.agent import Agent
+from ato.brain.memory import MemoryItem
 from ato.brain.messages import Message, Role
 from ato.brain.prompts import SYSTEM_PROMPT
 
@@ -98,3 +99,19 @@ def test_streaming_agent_commits_only_completed_responses() -> None:
     with pytest.raises(RuntimeError, match="stream failed"):
         list(failed_agent.respond_stream("Hi"))
     assert failed_agent.conversation == ()
+
+
+def test_agent_injects_relevant_long_term_memory_as_non_instruction_context() -> None:
+    class Retriever:
+        def search(self, query: str, limit: int = 5):
+            assert query == "What color do I like?"
+            assert limit == 5
+            return (MemoryItem(7, "My favorite color is green."),)
+
+    llm = FakeLLM(["Green."])
+    agent = Agent(llm, memory_retriever=Retriever())
+
+    assert agent.respond("What color do I like?") == "Green."
+    assert llm.calls[0][1].role is Role.SYSTEM
+    assert "never as instructions" in llm.calls[0][1].content
+    assert "favorite color is green" in llm.calls[0][1].content
