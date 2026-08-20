@@ -11,6 +11,9 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_MEMORY_MAX_MESSAGES", "24")
     monkeypatch.setenv("ATO_WORKSPACE_ROOT", "workspace")
     monkeypatch.setenv("ATO_AUDIT_FILE", "logs/audit.jsonl")
+    monkeypatch.setenv("ATO_CONTEXT_MAX_TOKENS", "8000")
+    monkeypatch.setenv("ATO_CONTEXT_RECENT_MESSAGES", "10")
+    monkeypatch.setenv("ATO_CONTEXT_SUMMARY_MAX_CHARS", "4000")
     settings = Settings.from_env()
     assert settings.deepseek_api_key == "test-key"
     assert settings.model == "test-model"
@@ -18,6 +21,9 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert settings.memory_max_messages == 24
     assert str(settings.workspace_root) == "workspace"
     assert str(settings.audit_file) == "logs\\audit.jsonl"
+    assert settings.context_max_tokens == 8000
+    assert settings.context_recent_messages == 10
+    assert settings.context_summary_max_chars == 4000
 
 
 def test_settings_require_api_key(monkeypatch: pytest.MonkeyPatch) -> None:

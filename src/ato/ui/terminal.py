@@ -6,6 +6,7 @@ import json
 from collections.abc import Callable
 
 from ato.brain.agent import Agent
+from ato.brain.context import ContextManager
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.memory import JsonMemoryStore
@@ -63,7 +64,7 @@ def run_terminal(
         try:
             reply = agent.respond(user_input)
             if memory_store is not None:
-                memory_store.save_history(agent.conversation)
+                memory_store.save_context(agent.conversation, agent.summary)
         except AtoError as exc:
             write(f"Ato error: {exc}")
             continue
@@ -80,7 +81,7 @@ def main() -> None:
             settings.memory_file,
             max_messages=settings.memory_max_messages,
         )
-        history = memory_store.load_history()
+        memory_context = memory_store.load_context()
         tool_registry = build_read_only_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
@@ -91,6 +92,17 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     run_terminal(
-        Agent(provider, history=history, tools=tool_registry),
+        Agent(
+            provider,
+            history=memory_context.history,
+            summary=memory_context.summary,
+            context_manager=ContextManager(
+                max_tokens=settings.context_max_tokens,
+                recent_messages=settings.context_recent_messages,
+                max_summary_chars=settings.context_summary_max_chars,
+                max_messages=settings.memory_max_messages,
+            ),
+            tools=tool_registry,
+        ),
         memory_store=memory_store,
     )

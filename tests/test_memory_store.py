@@ -71,3 +71,22 @@ def test_clear_removes_persisted_memory(tmp_path) -> None:
     store.clear()
 
     assert store.load_history() == ()
+
+
+def test_memory_context_persists_summary_and_loads_version_one(tmp_path) -> None:
+    path = tmp_path / "memory.json"
+    store = JsonMemoryStore(path)
+    messages = [Message(Role.USER, "recent")]
+    store.save_context(messages, "Earlier discussion")
+
+    restored = store.load_context()
+    assert restored.summary == "Earlier discussion"
+    assert restored.history == tuple(messages)
+
+    path.write_text(
+        json.dumps({"version": 1, "history": [{"role": "user", "content": "legacy"}]}),
+        encoding="utf-8",
+    )
+    legacy = store.load_context()
+    assert legacy.summary == ""
+    assert legacy.history == (Message(Role.USER, "legacy"),)
