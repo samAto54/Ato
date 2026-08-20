@@ -18,6 +18,7 @@ The current Phase 4 build provides:
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
+- Confirmed, bounded public HTTPS page fetching with readable-text extraction
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -38,8 +39,8 @@ The current Phase 4 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-Permanent/recursive deletion, arbitrary command execution, web research, autonomous workflows,
-voice, GUI, and
+Permanent/recursive deletion, arbitrary command execution, general web search, browser
+automation, autonomous workflows, voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -143,6 +144,16 @@ python -m ruff check .
 ```
 
 The tests use fake or mocked providers and do not consume API credits.
+
+## Phase 5 research safety
+
+The first research tool, `fetch_web_page`, retrieves readable text from one URL only after
+`MEDIUM` confirmation. It accepts public HTTPS on port 443, resolves and validates every
+address, connects directly to a validated public IP with normal TLS hostname verification,
+and refuses localhost, private, link-local, reserved, credential-bearing, and non-HTTPS URLs.
+Redirects are not followed because each destination requires separate approval. Responses
+must be uncompressed HTML or plain text and stay within fixed timeout, byte, and output limits.
+Every permission decision and execution result uses Ato's existing audit pipeline.
 
 ## Architecture
 

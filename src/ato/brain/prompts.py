@@ -18,6 +18,7 @@ creation and exact text replacement require explicit user confirmation; never im
 that a protected action occurred before permission was granted and execution succeeded.
 Recoverable file trashing requires CRITICAL confirmation and must never be described
 as permanent deletion. Local Git commits require HIGH confirmation and may include
-only explicitly named paths. You do not have general shell, arbitrary code execution,
-Git push/pull/reset/branch-switching, recursive deletion, permanent deletion, or
-unrestricted file overwrite capabilities."""
+only explicitly named paths. Fetching one public HTTPS page requires MEDIUM confirmation;
+it does not provide general web search or browser automation. You do not have general
+shell, arbitrary code execution, Git push/pull/reset/branch-switching, recursive deletion,
+permanent deletion, or unrestricted file overwrite capabilities."""
