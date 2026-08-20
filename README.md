@@ -16,6 +16,7 @@ The current Phase 4 build provides:
 - Persisted summaries with recent messages retained verbatim
 - Explicit SQLite long-term facts with bounded relevance retrieval
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
+- Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -175,8 +176,10 @@ Local RAG is available through `/ingest <workspace-path>`, `/knowledge`, and con
 common source-code and configuration formats up to 500,000 bytes, plus PDF and DOCX files
 up to 10 MB. PDFs are limited to 200 pages; DOCX archives and all extracted text have
 additional expansion limits. Documents are chunked into ignored local SQLite storage and
-retrieved with bounded keyword scoring. PDF page markers and DOCX table markers are retained
-in extracted text to improve source context.
+retrieved through local SQLite FTS5 with BM25 relevance ranking. Existing knowledge databases
+are indexed automatically, and Ato falls back to bounded lexical scoring on Python builds that
+do not provide FTS5. PDF page markers and DOCX table markers are retained in extracted text to
+improve source context.
 Re-ingesting an unchanged document is idempotent; changed documents replace their old
 chunks. Environment files, protected directories, symlinks, unsupported formats, paths
 outside the workspace, encrypted or malformed documents, and content that appears to contain
