@@ -26,6 +26,7 @@ class Settings:
     context_summary_max_chars: int = 6_000
     long_term_memory_file: Path = Path("data/long_term_memory.db")
     knowledge_file: Path = Path("data/knowledge.db")
+    brave_search_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -44,6 +45,10 @@ class Settings:
             os.getenv("ATO_LONG_TERM_MEMORY_FILE", "data/long_term_memory.db").strip()
         )
         knowledge_file = Path(os.getenv("ATO_KNOWLEDGE_FILE", "data/knowledge.db").strip())
+        raw_brave_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+        brave_search_api_key = (
+            None if raw_brave_key in {"", "your_brave_search_api_key_here"} else raw_brave_key
+        )
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -87,4 +92,5 @@ class Settings:
             context_summary_max_chars=summary_chars,
             long_term_memory_file=long_term_memory_file,
             knowledge_file=knowledge_file,
+            brave_search_api_key=brave_search_api_key,
         )

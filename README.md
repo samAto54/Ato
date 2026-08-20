@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 4 build provides:
+The current Phase 5 build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -20,6 +20,7 @@ The current Phase 4 build provides:
 - Injection-resistant JSON retrieval context with source-label citation instructions
 - Confirmed, bounded public HTTPS page fetching with readable-text extraction
 - Injection-resistant external evidence labels and exact-URL citation instructions
+- Optional confirmed Brave web search with bounded, untrusted result snippets
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -40,8 +41,8 @@ The current Phase 4 build provides:
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
 
-Permanent/recursive deletion, arbitrary command execution, general web search, browser
-automation, autonomous workflows, voice, GUI, and
+Permanent/recursive deletion, arbitrary command execution, browser automation, autonomous
+workflows, voice, GUI, and
 cybersecurity capabilities are intentionally reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
@@ -108,10 +109,11 @@ Copy the safe environment template:
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and replace the placeholder with your own API key:
+Edit `.env` and replace the DeepSeek placeholder with your key. The Brave key is optional:
 
 ```dotenv
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
+BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
 ATO_MODEL=deepseek-v4-flash
 ATO_MEMORY_FILE=data/memory.json
 ATO_MEMORY_MAX_MESSAGES=40
@@ -159,12 +161,27 @@ Fetched results include an exact `source_url` and an `untrusted_external` trust 
 system policy treats all webpage text as evidence rather than instructions, ignores action
 requests embedded in pages, and requires the exact URL when an answer relies on that evidence.
 
+When `BRAVE_SEARCH_API_KEY` is configured, Ato also registers `web_search`. Each query requires
+`MEDIUM` confirmation because it sends the query to Brave and may consume API allowance. Search
+is limited to ten results and Brave's 400-character/50-word query limits. Returned titles,
+URLs, and descriptions are labelled untrusted; Ato is instructed to fetch relevant pages before
+making detailed claims. Create and protect the key according to the
+[official Brave Search API quickstart](https://api-dashboard.search.brave.com/documentation/quickstart).
+
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
 
 ```powershell
 $env:ATO_RUN_LIVE_WEB_TESTS="1"
 python -m pytest tests/test_web_live.py -m live_network -v
+Remove-Item Env:ATO_RUN_LIVE_WEB_TESTS
+```
+
+With `BRAVE_SEARCH_API_KEY` set in the current shell, the same opt-in switch can verify search:
+
+```powershell
+$env:ATO_RUN_LIVE_WEB_TESTS="1"
+python -m pytest tests/test_web_search_live.py -m live_network -v
 Remove-Item Env:ATO_RUN_LIVE_WEB_TESTS
 ```
 
