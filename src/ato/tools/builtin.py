@@ -26,6 +26,8 @@ MAX_SEARCH_FILES = 500
 MAX_SEARCH_RESULTS = 100
 MAX_COMMAND_OUTPUT = 50_000
 MAX_WRITE_BYTES = 100_000
+MAX_COMMIT_PATHS = 20
+MAX_COMMIT_MESSAGE_CHARS = 200
 PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
 PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
@@ -259,6 +261,70 @@ def build_phase3_registry(
             15,
         )
 
+    def git_branches(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        return run_fixed(
+            [
+                "git",
+                "-c",
+                f"safe.directory={boundary.root.as_posix()}",
+                "branch",
+                "--list",
+                "--no-color",
+            ],
+            15,
+        )
+
+    def git_commit_files(arguments: Mapping[str, Any]) -> str:
+        raw_paths = arguments["paths"]
+        message = str(arguments["message"]).strip()
+        if not 1 <= len(raw_paths) <= MAX_COMMIT_PATHS:
+            raise ToolError(f"paths must contain between 1 and {MAX_COMMIT_PATHS} entries.")
+        if not message or len(message) > MAX_COMMIT_MESSAGE_CHARS or "\n" in message:
+            raise ToolError(
+                "Commit message must be one line and at most "
+                f"{MAX_COMMIT_MESSAGE_CHARS} characters."
+            )
+        relative_paths: list[str] = []
+        for raw_path in raw_paths:
+            target = boundary.write_target(str(raw_path))
+            relative = target.relative_to(boundary.root).as_posix()
+            if relative in relative_paths:
+                raise ToolError("Commit paths cannot contain duplicates.")
+            relative_paths.append(relative)
+        command = [
+            "git",
+            "-c",
+            f"safe.directory={boundary.root.as_posix()}",
+            "commit",
+            "--only",
+            "-m",
+            message,
+            "--",
+            *relative_paths,
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=boundary.root,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ToolError("The fixed Git commit command could not be executed.") from exc
+        output = (result.stdout + result.stderr).strip()
+        if result.returncode != 0:
+            raise ToolError(f"Git commit failed: {output[:1_000] or 'unknown Git error'}")
+        return json.dumps(
+            {
+                "committed_paths": relative_paths,
+                "output": output[:MAX_COMMAND_OUTPUT],
+                "truncated": len(output) > MAX_COMMAND_OUTPUT,
+            }
+        )
+
     def lint_project(arguments: Mapping[str, Any]) -> str:
         del arguments
         return run_fixed([sys.executable, "-m", "ruff", "check", "--no-cache", "."], 60)
@@ -442,6 +508,35 @@ def build_phase3_registry(
             },
             handler=git_log,
             permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="git_branches",
+            description="List local Git branches without changing repository state.",
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=git_branches,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="git_commit_files",
+            description=(
+                "Create one local Git commit containing only explicitly named workspace paths. "
+                "Requires HIGH confirmation and cannot push, pull, reset, or switch branches."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "paths": {"type": "array", "items": {"type": "string"}},
+                    "message": {"type": "string"},
+                },
+                "required": ["paths", "message"],
+                "additionalProperties": False,
+            },
+            handler=git_commit_files,
+            permission=PermissionLevel.HIGH,
         )
     )
     registry.register(

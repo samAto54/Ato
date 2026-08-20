@@ -22,6 +22,7 @@ The current Phase 3 build provides:
 - Fixed lint and test runners protected by permission prompts and timeouts
 - Confirmed, atomic tools for new text files and exact unique text replacement
 - CRITICAL-confirmation file trashing with a reported recovery path
+- Read-only local branch inspection and HIGH-confirmation path-scoped Git commits
 - Workspace path boundaries and a maximum tool-call limit
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
@@ -196,12 +197,16 @@ The first editing tools are deliberately narrow:
   and out-of-workspace targets are rejected.
 - `trash_text_file` moves one small UTF-8 file into ignored `data/trash/` storage after
   `CRITICAL` confirmation and returns its recovery path. It never deletes directories.
+- `git_branches` lists local branches without changing repository state.
+- `git_commit_files` creates a local commit for 1-20 explicit, non-protected paths after
+  `HIGH` confirmation. It uses fixed `git commit --only` arguments, caps one-line commit
+  messages at 200 characters, and preserves unrelated staged changes.
 
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
 and arguments and performs the operation. Lint and test execution accepts no command
 arguments, runs without a shell, and has strict time and output limits. There is no
-general shell, recursive/permanent deletion, unrestricted overwrite, or arbitrary
-Python-execution capability.
+general shell, Git push/pull/reset/branch-switching, recursive/permanent deletion,
+unrestricted overwrite, or arbitrary Python-execution capability.
 
 Every tool has a permission level:
 
