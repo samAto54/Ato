@@ -25,6 +25,7 @@ The current Phase 3 build provides:
 - A provider-neutral `LLMClient` interface
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
+- Provider-neutral structured JSON contracts with independent schema validation
 - Environment-based configuration with no hard-coded secrets
 - Friendly handling of expected startup and provider errors
 - Automated tests that do not make real API requests
@@ -153,6 +154,12 @@ The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments
 reassembled and validated before execution, and tool results remain subject to the
 same permissions and audit controls. A conversation turn is persisted only after the
 entire stream completes successfully; partial or failed streams do not enter memory.
+
+DeepSeek JSON mode is available through `StructuredOutputSpec` and
+`DeepSeekProvider.generate_structured`. Ato adds an explicit JSON-schema instruction,
+caps output size and tokens, parses the response safely, and validates object fields,
+nested arrays/objects, required fields, primitive types, enums, and additional-field
+rules. Invalid or empty provider output raises a controlled `StructuredOutputError`.
 
 ## Phase 3 tool safety
 

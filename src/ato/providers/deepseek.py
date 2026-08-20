@@ -9,9 +9,12 @@ from typing import Any
 from openai import APIConnectionError, APIError, AuthenticationError, OpenAI, RateLimitError
 
 from ato.brain.messages import Message
-from ato.exceptions import LLMError, ToolError
+from ato.brain.structured import StructuredOutputSpec
+from ato.exceptions import LLMError, StructuredOutputError, ToolError
 from ato.tools.registry import ToolRegistry
 
+MAX_STRUCTURED_OUTPUT_CHARS = 100_000
+STRUCTURED_OUTPUT_MAX_TOKENS = 4_096
 
 class DeepSeekProvider:
     """Generate Ato responses through DeepSeek's OpenAI-compatible API."""
@@ -140,11 +143,40 @@ class DeepSeekProvider:
                 )
                 conversation.append({"role": "tool", "tool_call_id": call["id"], "content": result})
 
+    def generate_structured(
+        self,
+        messages: Sequence[Message],
+        spec: StructuredOutputSpec,
+    ) -> dict[str, Any]:
+        """Generate one JSON object and validate it independently of the provider."""
+        conversation = [{"role": "system", "content": spec.prompt_instruction()}]
+        conversation.extend(
+            [{"role": message.role.value, "content": message.content} for message in messages]
+        )
+        response = self._create_completion(
+            conversation,
+            tools=None,
+            response_format={"type": "json_object"},
+            max_tokens=STRUCTURED_OUTPUT_MAX_TOKENS,
+        )
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
+            raise StructuredOutputError("DeepSeek returned empty structured output.")
+        if len(content) > MAX_STRUCTURED_OUTPUT_CHARS:
+            raise StructuredOutputError("DeepSeek structured output exceeded the size limit.")
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise StructuredOutputError("DeepSeek returned invalid JSON output.") from exc
+        return spec.validate(parsed)
+
     def _create_completion(
         self,
         conversation: list[dict[str, Any]],
         tools: ToolRegistry | None,
         stream: bool = False,
+        response_format: dict[str, str] | None = None,
+        max_tokens: int | None = None,
     ) -> Any:
         request: dict[str, Any] = {
             "model": self._model,
@@ -153,6 +185,10 @@ class DeepSeekProvider:
         }
         if tools is not None and tools.api_definitions():
             request["tools"] = tools.api_definitions()
+        if response_format is not None:
+            request["response_format"] = response_format
+        if max_tokens is not None:
+            request["max_tokens"] = max_tokens
 
         try:
             return self._client.chat.completions.create(**request)
