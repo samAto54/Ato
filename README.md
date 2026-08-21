@@ -12,6 +12,7 @@ The current build provides:
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
 - A secret-free `/status` view of local memory, knowledge, tool, and voice availability
 - Local rejection of unknown slash commands with a `/help` hint and no model API request
+- A bounded local `/history` view of recent verbatim conversation messages
 - Incremental streaming responses in the terminal
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -260,6 +261,9 @@ not call the model, probe the network, print provider credentials, or expose con
 Unknown input beginning with `/` is treated as a mistyped terminal command and rejected locally
 with a `/help` hint; it is not sent to the model. Reviewed voice transcripts bypass this parser and
 remain ordinary conversation text, even when their content starts with `/`.
+Use `/history` to display up to the 20 most recent verbatim conversation messages. Each displayed
+message is normalized to one line and capped at 200 characters; older messages and compacted
+summary text are not expanded. This command is local and does not make a model request.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.

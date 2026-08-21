@@ -67,6 +67,40 @@ def test_terminal_rejects_unknown_slash_command_without_calling_model() -> None:
     assert not any(line.startswith("Ato: Echo:") for line in output)
 
 
+def test_terminal_history_shows_bounded_recent_messages_without_model_call() -> None:
+    history = [
+        Message(Role.USER, f"message {index}\nwith spacing")
+        if index % 2 == 0
+        else Message(Role.ASSISTANT, "x" * 220)
+        for index in range(22)
+    ]
+    inputs = iter(["/history", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM(), history=history),
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert "Ato recent conversation:" in output
+    assert "  ... 2 older messages omitted" in output
+    assert "  user: message 2 with spacing" in output
+    assistant_lines = [line for line in output if line.startswith("  assistant:")]
+    assert assistant_lines
+    assert all(len(line.removeprefix("  assistant: ")) == 200 for line in assistant_lines)
+    assert not any(line.startswith("Ato: Echo:") for line in output)
+
+
+def test_terminal_history_reports_empty_conversation() -> None:
+    inputs = iter(["/history", "quit"])
+    output: list[str] = []
+
+    run_terminal(Agent(EchoLLM()), read=lambda prompt: next(inputs), write=output.append)
+
+    assert "Ato: No conversation messages yet." in output
+
+
 def test_terminal_saves_successful_turns(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     inputs = iter(["Hello", "quit"])
