@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 7 build provides:
+The current Phase 8 build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -26,6 +26,7 @@ The current Phase 7 build provides:
 - Page-labelled text extraction from bounded public PDF sources
 - Injection-resistant external evidence labels and exact-URL citation instructions
 - Optional confirmed Tavily or Brave web search with bounded, untrusted result snippets
+- Confirmed multi-source web research with URL deduplication, host diversity, and partial failures
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -181,6 +182,16 @@ so a normal request costs one free-plan credit. Returned titles, URLs, and descr
 labelled untrusted; Ato is instructed to fetch relevant pages before making detailed claims.
 See the [Tavily Search API reference](https://docs.tavily.com/documentation/api-reference/endpoint/search)
 or [Brave Search quickstart](https://api-dashboard.search.brave.com/documentation/quickstart).
+
+The same configured provider also enables `research_web`. After one `MEDIUM` confirmation, it
+searches up to ten candidates and fetches at most three public HTTPS sources through the same
+DNS, address, redirect, content-type, size, and timeout protections as `fetch_web_page`. Search
+order is retained while duplicate URLs, non-HTTPS results, and excess results from one hostname
+are removed. Each successful source contributes at most 2,500 characters, keeping the combined
+evidence below normal tool-context limits. A rejected or unreadable source is reported as a
+bounded per-source failure and does not discard evidence already collected from other sources.
+All returned titles, snippets, text, URLs, and errors remain untrusted external data. Ato is
+instructed to cite exact successful `source_url` values and disclose insufficient source coverage.
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
