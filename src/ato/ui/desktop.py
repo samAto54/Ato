@@ -33,6 +33,8 @@ class DesktopChatController:
 
     agent: Agent
     memory_store: JsonMemoryStore | None = None
+    long_term_memory: SqliteLongTermMemory | None = None
+    knowledge_store: SqliteKnowledgeStore | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -42,6 +44,39 @@ class DesktopChatController:
         if self.memory_store is not None:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
         return reply
+
+    def memory_snapshot(self) -> tuple[str, ...]:
+        if self.long_term_memory is None:
+            return ("Long-term memory is not configured.",)
+        records = self.long_term_memory.list_records(limit=50, include_inactive=True)
+        if not records:
+            return ("No long-term memories saved.",)
+        lines = []
+        for record in records:
+            status = (
+                "archived"
+                if record.archived_at
+                else "expiration set"
+                if record.expires_at
+                else "active"
+            )
+            content = " ".join(record.content.split())
+            if len(content) > 240:
+                content = f"{content[:237]}..."
+            heading = f"#{record.id}  {record.category.value.upper()}  {status.upper()}"
+            lines.append(f"{heading}\n{content}")
+        return tuple(lines)
+
+    def knowledge_snapshot(self) -> tuple[str, ...]:
+        if self.knowledge_store is None:
+            return ("Knowledge storage is not configured.",)
+        documents = self.knowledge_store.list_documents()[:100]
+        if not documents:
+            return ("No knowledge documents ingested.",)
+        return tuple(
+            f"#{document.id}  {document.path}\n{document.chunks} indexed chunks"
+            for document in documents
+        )
 
 
 class AtoDesktop:
@@ -58,6 +93,7 @@ class AtoDesktop:
         self.root.geometry("1100x720")
         self.root.minsize(820, 560)
         self._busy = False
+        self._section = "CHAT"
         self._build()
         self._apply_theme()
         self._restore_visible_history()
@@ -72,9 +108,19 @@ class AtoDesktop:
         self.brand.pack(fill="x", padx=20, pady=(22, 4))
         self.mode_label = tk.Label(self.sidebar, text="PERSONAL AGENT", anchor="w")
         self.mode_label.pack(fill="x", padx=20, pady=(0, 22))
+        self.nav_buttons = {}
         for label in ("CHAT", "MEMORY", "KNOWLEDGE", "RESEARCH", "ACTIVITY"):
-            widget = tk.Label(self.sidebar, text=label, anchor="w", padx=20, pady=8)
+            widget = tk.Button(
+                self.sidebar,
+                text=label,
+                anchor="w",
+                padx=20,
+                pady=8,
+                relief="flat",
+                command=lambda selected=label: self._show_section(selected),
+            )
             widget.pack(fill="x")
+            self.nav_buttons[label] = widget
 
         self.status = tk.Label(
             self.sidebar,
@@ -132,6 +178,15 @@ class AtoDesktop:
         self.brand.configure(font=(theme.heading_family, 22), fg=theme.accent)
         self.mode_label.configure(fg=theme.muted_text)
         self.status.configure(fg=theme.accent_secondary)
+        for label, button in self.nav_buttons.items():
+            active = label == self._section
+            button.configure(
+                bg=theme.border if active else theme.panel_alt,
+                fg=theme.accent if active else theme.text,
+                activebackground=theme.border,
+                activeforeground=theme.accent,
+                font=(theme.heading_family if active else theme.font_family, 10),
+            )
         self.title.configure(bg=theme.panel, fg=theme.text, font=(theme.heading_family, 16))
         self.lock_badge.configure(
             bg=theme.panel_alt,
@@ -194,6 +249,46 @@ class AtoDesktop:
         for message in self.controller.agent.conversation[-20:]:
             self._append(message.role.value.title(), message.content)
 
+    def _show_section(self, section: str) -> None:
+        self._section = section
+        self._clear_transcript()
+        if section == "CHAT":
+            self.title.configure(text="Ato is thinking…" if self._busy else "Conversation")
+            self.composer.pack(
+                side="bottom",
+                fill="x",
+                padx=16,
+                pady=(0, 16),
+                before=self.transcript,
+            )
+            self._restore_visible_history()
+            self.input.focus_set()
+        else:
+            self.composer.pack_forget()
+            self.title.configure(text=section.title())
+            if section == "MEMORY":
+                lines = self.controller.memory_snapshot()
+            elif section == "KNOWLEDGE":
+                lines = self.controller.knowledge_snapshot()
+            elif section == "RESEARCH":
+                lines = ("Desktop research is locked until GUI permission dialogs are available.",)
+            else:
+                lines = ("Desktop tool activity is locked. Use the terminal for audited tools.",)
+            self._show_read_only_lines(lines)
+        self._apply_theme()
+
+    def _clear_transcript(self) -> None:
+        self.transcript.configure(state="normal")
+        self.transcript.delete("1.0", "end")
+        self.transcript.configure(state="disabled")
+
+    def _show_read_only_lines(self, lines: tuple[str, ...]) -> None:
+        self.transcript.configure(state="normal")
+        for line in lines:
+            self.transcript.insert("end", line, ChatStyle.BODY.value)
+            self.transcript.insert("end", "\n\n", ChatStyle.BODY.value)
+        self.transcript.configure(state="disabled")
+
     def _append(self, role: str, content: str) -> None:
         self.transcript.configure(state="normal")
         role_tag = "role_you" if role.casefold() in {"you", "user"} else "role_ato"
@@ -229,13 +324,15 @@ class AtoDesktop:
             self.root.after(0, self._finish_request, reply, None)
 
     def _finish_request(self, reply: str | None, error: str | None) -> None:
-        self._append("Ato" if reply is not None else "Error", reply or error or "Unknown error")
+        if self._section == "CHAT":
+            self._append("Ato" if reply is not None else "Error", reply or error or "Unknown error")
         self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self.send_button.configure(state="disabled" if busy else "normal")
-        self.title.configure(text="Ato is thinking…" if busy else "Conversation")
+        if self._section == "CHAT":
+            self.title.configure(text="Ato is thinking…" if busy else "Conversation")
 
     def run(self) -> None:
         self.input.focus_set()
@@ -264,7 +361,9 @@ def main() -> None:
             memory_retriever=CompositeMemoryRetriever(long_term_memory, knowledge_store),
             tools=None,
         )
-        AtoDesktop(DesktopChatController(agent, memory_store)).run()
+        AtoDesktop(
+            DesktopChatController(agent, memory_store, long_term_memory, knowledge_store)
+        ).run()
     except (AtoError, ValueError) as exc:
         raise SystemExit(f"Unable to start Ato desktop: {exc}") from exc
 

@@ -297,6 +297,10 @@ supported window sizes.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
+The desktop sidebar is functional: Chat restores the 20 most recent messages, while Memory and
+Knowledge show bounded read-only local snapshots. Research and Activity display explicit locked
+states until GUI tool confirmations are available. Mutating memory, knowledge, research, and tool
+operations remain confined to the permission-controlled terminal interface for now.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
