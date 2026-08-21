@@ -8,12 +8,22 @@ from dataclasses import dataclass
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
+from ato.brain.prompts import SYSTEM_PROMPT
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
+
+DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
+
+Desktop runtime constraint: this interface is currently chat-only and provides no tools. You
+cannot browse or fetch web pages, inspect or change files, run commands, use Git, access the
+clipboard, record audio, or perform any other tool action in this runtime. Never claim that you
+performed an unavailable action. Clearly state the limitation when a request requires a tool and
+offer a text-only alternative. Treat recollections of tool results from earlier turns as historical
+conversation, not evidence that tools are available now."""
 
 
 @dataclass(slots=True)
@@ -81,6 +91,8 @@ class AtoDesktop:
         self.title.pack(side="left", padx=20, pady=16)
         self.theme_button = tk.Button(self.header, command=self._toggle_theme, relief="flat")
         self.theme_button.pack(side="right", padx=20, pady=12)
+        self.lock_badge = tk.Label(self.header, text="CHAT-ONLY • TOOLS LOCKED", padx=10, pady=5)
+        self.lock_badge.pack(side="right", pady=15)
 
         self.transcript = tk.Text(
             self.main_panel,
@@ -92,10 +104,8 @@ class AtoDesktop:
             spacing2=3,
             spacing3=10,
         )
-        self.transcript.pack(fill="both", expand=True, padx=16, pady=(0, 10))
-
         self.composer = tk.Frame(self.main_panel)
-        self.composer.pack(fill="x", padx=16, pady=(0, 16))
+        self.composer.pack(side="bottom", fill="x", padx=16, pady=(0, 16))
         self.input = tk.Text(self.composer, height=3, wrap="word", relief="flat", padx=12, pady=10)
         self.input.pack(side="left", fill="x", expand=True)
         self.input.bind("<Control-Return>", self._submit_event)
@@ -107,6 +117,7 @@ class AtoDesktop:
             relief="flat",
         )
         self.send_button.pack(side="right", fill="y", padx=(10, 0))
+        self.transcript.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
     def _apply_theme(self) -> None:
         theme = self.theme
@@ -121,6 +132,11 @@ class AtoDesktop:
         self.mode_label.configure(fg=theme.muted_text)
         self.status.configure(fg=theme.accent_secondary)
         self.title.configure(bg=theme.panel, fg=theme.text, font=(theme.heading_family, 16))
+        self.lock_badge.configure(
+            bg=theme.panel_alt,
+            fg=theme.warning,
+            font=(theme.font_family, 9),
+        )
         self.theme_button.configure(
             text=f"Switch to {alternate_theme(theme.id).display_name}",
             bg=theme.panel_alt,
@@ -210,6 +226,7 @@ def main() -> None:
         knowledge_store = SqliteKnowledgeStore(settings.knowledge_file, settings.workspace_root)
         agent = Agent(
             DeepSeekProvider(settings.deepseek_api_key, settings.model),
+            system_prompt=DESKTOP_SYSTEM_PROMPT,
             history=memory_context.history,
             summary=memory_context.summary,
             context_manager=ContextManager(

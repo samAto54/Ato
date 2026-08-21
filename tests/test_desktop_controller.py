@@ -5,7 +5,7 @@ import pytest
 from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.memory import JsonMemoryStore
-from ato.ui.desktop import DesktopChatController
+from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController
 
 
 class EchoLLM:
@@ -26,3 +26,11 @@ def test_desktop_controller_rejects_empty_message() -> None:
     controller = DesktopChatController(Agent(EchoLLM()))
     with pytest.raises(ValueError, match="empty"):
         controller.submit("   ")
+
+
+def test_desktop_policy_forbids_claims_of_unavailable_tool_use() -> None:
+    policy = " ".join(DESKTOP_SYSTEM_PROMPT.split())
+    assert "chat-only" in policy
+    assert "provides no tools" in policy
+    assert "Never claim that you performed an unavailable action" in policy
+    assert "browse or fetch web pages" in policy
