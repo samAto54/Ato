@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,8 @@ class Settings:
     edit_checkpoint_file: Path = Path("data/edit_checkpoints.db")
     brave_search_api_key: str | None = None
     tavily_api_key: str | None = None
+    github_repository: str | None = None
+    github_token: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -60,6 +63,12 @@ class Settings:
         tavily_api_key = (
             None if raw_tavily_key in {"", "your_tavily_api_key_here"} else raw_tavily_key
         )
+        raw_github_repository = os.getenv("ATO_GITHUB_REPOSITORY", "").strip()
+        github_repository = raw_github_repository or None
+        raw_github_token = os.getenv("GITHUB_TOKEN", "").strip()
+        github_token = (
+            None if raw_github_token in {"", "your_github_token_here"} else raw_github_token
+        )
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -67,6 +76,10 @@ class Settings:
             )
         if not model:
             raise ConfigurationError("ATO_MODEL cannot be empty.")
+        if github_repository and not re.fullmatch(
+            r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", github_repository
+        ):
+            raise ConfigurationError("ATO_GITHUB_REPOSITORY must use the owner/name format.")
 
         try:
             max_messages = int(raw_max_messages)
@@ -107,4 +120,6 @@ class Settings:
             edit_checkpoint_file=edit_checkpoint_file,
             brave_search_api_key=brave_search_api_key,
             tavily_api_key=tavily_api_key,
+            github_repository=github_repository,
+            github_token=github_token,
         )
