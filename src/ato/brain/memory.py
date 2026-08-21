@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -33,10 +34,16 @@ class CompositeMemoryRetriever:
     def search(self, query: str, limit: int = 5) -> tuple[MemoryItem, ...]:
         groups = [tuple(retriever.search(query, limit=limit)) for retriever in self._retrievers]
         combined: list[MemoryItem] = []
+        seen: set[str] = set()
         for index in range(limit):
             for group in groups:
                 if index < len(group):
-                    combined.append(group[index])
+                    item = group[index]
+                    key = " ".join(re.findall(r"[a-z0-9]+", item.content.casefold()))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    combined.append(item)
                     if len(combined) >= limit:
                         return tuple(combined)
         return tuple(combined)
