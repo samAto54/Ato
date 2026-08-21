@@ -28,6 +28,7 @@ from ato.tools.search import BraveSearchClient, TavilySearchClient
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
 EXIT_COMMANDS = {"exit", "quit"}
+HELP_COMMAND = "/help"
 CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
@@ -43,6 +44,27 @@ LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
 VOICE_PREFIX = "/voice "
 SPEAK_LAST_COMMAND = "/speak-last"
+
+HELP_TEXT = """Ato terminal commands:
+  /help                              Show this command reference
+  /clear-memory                      Clear conversation history
+  /remember [category:] <text>       Save a long-term memory
+  /memories                          List active long-term memories
+  /all-memories                      List active, archived, and expired memories
+  /edit-memory <id> [category:] <text>
+  /forget <id>                       Delete one memory after confirmation
+  /archive-memory <id>               Archive one memory
+  /restore-memory <id>               Restore one archived memory
+  /expire-memory <id> <days>         Set memory expiration (1-3650 days)
+  /clear-memory-expiration <id>      Remove a memory expiration
+  /ingest <path>                     Add a local knowledge document
+  /knowledge                         List knowledge documents
+  /remove-document <id>              Remove a document after confirmation
+  /voice <seconds>                   Record and review a voice turn (1-120 seconds)
+  /speak-last                        Speak the latest assistant reply
+  exit | quit                        Close Ato
+
+Some commands require configured optional providers or confirmation."""
 
 
 def confirm_tool(request: PermissionRequest) -> bool:
@@ -82,6 +104,9 @@ def run_terminal(
         if user_input.lower() in EXIT_COMMANDS:
             write("Goodbye.")
             return
+        if user_input.lower() == HELP_COMMAND:
+            write(HELP_TEXT)
+            continue
         if user_input.lower() == SPEAK_LAST_COMMAND:
             if tool_registry is None:
                 write("Ato error: Voice tools are unavailable.")
