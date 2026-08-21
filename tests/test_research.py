@@ -53,9 +53,10 @@ def test_research_coordinator_deduplicates_diversifies_and_bounds_sources() -> N
 
     def fetcher(url: str) -> str:
         fetched.append(url)
-        return _page(url, "x" * 3_000)
+        return _page(url, "Ato " + "x" * 2_996)
 
-    result = json.loads(WebResearchCoordinator(searcher, fetcher).research("Ato", 3))
+    raw_result = WebResearchCoordinator(searcher, fetcher).research("Ato", 3)
+    result = json.loads(raw_result)
 
     assert searcher.calls == [("Ato", 9)]
     assert fetched == [
@@ -67,6 +68,7 @@ def test_research_coordinator_deduplicates_diversifies_and_bounds_sources() -> N
     assert all(len(source["text"]) == 2_500 for source in result["sources"])
     assert all(source["text_truncated"] is True for source in result["sources"])
     assert result["content_trust"] == "untrusted_external"
+    assert len(raw_result) < 12_000
 
 
 def test_research_coordinator_reports_source_failures_without_losing_evidence() -> None:
@@ -88,6 +90,62 @@ def test_research_coordinator_reports_source_failures_without_losing_evidence() 
     assert result["failures"] == [
         {"source_url": "https://bad.example/", "error": "Source rejected safely."}
     ]
+
+
+def test_research_maps_relevant_passages_and_flags_only_potential_disagreements() -> None:
+    searcher = FakeSearcher(
+        [
+            {"title": "One", "url": "https://one.example/", "description": "first"},
+            {"title": "Two", "url": "https://two.example/", "description": "second"},
+        ]
+    )
+    pages = {
+        "https://one.example/": (
+            "Unrelated introduction. Revenue growth reached 20% in 2025. "
+            "Revenue outlook remains positive."
+        ),
+        "https://two.example/": "Revenue growth reached 30% in 2025. Another topic was 99%.",
+    }
+
+    result = json.loads(
+        WebResearchCoordinator(searcher, lambda url: _page(url, pages[url])).research(
+            "revenue growth 2025", 2
+        )
+    )
+
+    assert [source["source_id"] for source in result["sources"]] == ["S1", "S2"]
+    assert [item["evidence_id"] for item in result["evidence_map"]] == [
+        "S1-E1",
+        "S1-E2",
+        "S2-E1",
+    ]
+    assert result["evidence_map"][0]["source_url"] == "https://one.example/"
+    hint = result["potential_disagreements"][0]
+    assert hint["type"] == "potential_numeric_disagreement"
+    assert hint["evidence_ids"] == ["S1-E1", "S2-E1"]
+    assert hint["values"] == [["20%"], ["30%"]]
+    assert "do not by themselves prove" in result["analysis_notice"]
+
+
+def test_research_does_not_flag_numbers_without_shared_query_context() -> None:
+    searcher = FakeSearcher(
+        [
+            {"title": "One", "url": "https://one.example/", "description": "first"},
+            {"title": "Two", "url": "https://two.example/", "description": "second"},
+        ]
+    )
+    pages = {
+        "https://one.example/": "Revenue was 20 million.",
+        "https://two.example/": "Employee count was 300.",
+    }
+
+    result = json.loads(
+        WebResearchCoordinator(searcher, lambda url: _page(url, pages[url])).research(
+            "revenue employee comparison", 2
+        )
+    )
+
+    assert result["potential_disagreements"] == []
 
 
 @pytest.mark.parametrize("max_sources", [0, 4])

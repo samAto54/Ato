@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -15,8 +16,32 @@ MAX_RESEARCH_SOURCES = 3
 MAX_CANDIDATES = 10
 MAX_SOURCES_PER_HOST = 2
 MAX_SOURCE_TEXT_CHARS = 2_500
-MAX_METADATA_CHARS = 1_000
+MAX_METADATA_CHARS = 300
 MAX_FAILURE_CHARS = 300
+MAX_PASSAGES_PER_SOURCE = 2
+MAX_PASSAGE_CHARS = 300
+MAX_DISAGREEMENT_HINTS = 5
+WORD_PATTERN = re.compile(r"[a-z0-9]+", re.IGNORECASE)
+NUMBER_PATTERN = re.compile(r"(?<!\w)(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?%?)(?!\w)")
+SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+|\n+")
+STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "for",
+    "in",
+    "is",
+    "of",
+    "on",
+    "the",
+    "to",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+}
 
 
 class WebResearchCoordinator:
@@ -54,6 +79,7 @@ class WebResearchCoordinator:
                     raise ToolError("Fetched source contained no readable text.")
                 sources.append(
                     {
+                        "source_id": f"S{rank}",
                         "rank": rank,
                         "title": str(page.get("title") or candidate["title"])[
                             :MAX_METADATA_CHARS
@@ -70,12 +96,20 @@ class WebResearchCoordinator:
             except ToolError as exc:
                 failures.append({"source_url": url, "error": str(exc)[:MAX_FAILURE_CHARS]})
 
+        evidence_map = _build_evidence_map(str(search_payload.get("query", query)), sources)
+
         return json.dumps(
             {
                 "query": str(search_payload.get("query", query)),
                 "provider": str(search_payload.get("provider", "unknown")),
                 "content_trust": "untrusted_external",
                 "sources": sources,
+                "evidence_map": evidence_map,
+                "potential_disagreements": _find_numeric_disagreements(evidence_map),
+                "analysis_notice": (
+                    "Passage matching is lexical. Numeric disagreement hints require review "
+                    "and do not by themselves prove a contradiction."
+                ),
                 "failures": failures,
                 "searched_results": len(raw_results),
                 "selected_results": len(candidates),
@@ -130,3 +164,76 @@ def _canonical_https_url(value: str) -> str | None:
     ):
         return None
     return urlunsplit(("https", parsed.netloc.casefold(), parsed.path or "/", parsed.query, ""))
+
+
+def _build_evidence_map(query: str, sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    query_terms = _terms(query)
+    query_set = set(query_terms)
+    query_pairs = set(zip(query_terms, query_terms[1:], strict=False))
+    evidence: list[dict[str, Any]] = []
+    for source in sources:
+        ranked: list[tuple[float, int, str, list[str]]] = []
+        sentences = SENTENCE_BOUNDARY.split(str(source["text"]))
+        for ordinal, raw_sentence in enumerate(sentences):
+            sentence = " ".join(raw_sentence.split())
+            if not sentence:
+                continue
+            sentence_terms = _terms(sentence)
+            overlap = sorted(query_set & set(sentence_terms))
+            if not overlap:
+                continue
+            sentence_pairs = set(zip(sentence_terms, sentence_terms[1:], strict=False))
+            score = len(overlap) / max(1, len(query_set))
+            score += len(query_pairs & sentence_pairs) / max(1, len(query_pairs))
+            ranked.append((score, -ordinal, sentence[:MAX_PASSAGE_CHARS], overlap))
+        ranked.sort(reverse=True)
+        for passage_index, (_, _, passage, overlap) in enumerate(
+            ranked[:MAX_PASSAGES_PER_SOURCE], start=1
+        ):
+            evidence.append(
+                {
+                    "evidence_id": f"{source['source_id']}-E{passage_index}",
+                    "source_id": source["source_id"],
+                    "source_url": source["source_url"],
+                    "passage": passage,
+                    "matched_query_terms": overlap,
+                    "numbers": NUMBER_PATTERN.findall(passage),
+                }
+            )
+    return evidence
+
+
+def _find_numeric_disagreements(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    hints: list[dict[str, Any]] = []
+    for index, left in enumerate(evidence):
+        left_numbers = set(left["numbers"])
+        if not left_numbers:
+            continue
+        for right in evidence[index + 1 :]:
+            if left["source_id"] == right["source_id"]:
+                continue
+            right_numbers = set(right["numbers"])
+            shared_terms = sorted(
+                set(left["matched_query_terms"]) & set(right["matched_query_terms"])
+            )
+            differing_left = left_numbers - right_numbers
+            differing_right = right_numbers - left_numbers
+            if not right_numbers or not shared_terms or not differing_left or not differing_right:
+                continue
+            hints.append(
+                {
+                    "type": "potential_numeric_disagreement",
+                    "evidence_ids": [left["evidence_id"], right["evidence_id"]],
+                    "shared_query_terms": shared_terms,
+                    "values": [sorted(differing_left), sorted(differing_right)],
+                }
+            )
+            if len(hints) >= MAX_DISAGREEMENT_HINTS:
+                return hints
+    return hints
+
+
+def _terms(value: str) -> tuple[str, ...]:
+    return tuple(
+        term for term in WORD_PATTERN.findall(value.casefold()) if term not in STOP_WORDS
+    )

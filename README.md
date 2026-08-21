@@ -27,6 +27,7 @@ The current Phase 8 build provides:
 - Injection-resistant external evidence labels and exact-URL citation instructions
 - Optional confirmed Tavily or Brave web search with bounded, untrusted result snippets
 - Confirmed multi-source web research with URL deduplication, host diversity, and partial failures
+- Stable evidence-passage IDs and conservative cross-source numeric disagreement hints
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -192,6 +193,13 @@ evidence below normal tool-context limits. A rejected or unreadable source is re
 bounded per-source failure and does not discard evidence already collected from other sources.
 All returned titles, snippets, text, URLs, and errors remain untrusted external data. Ato is
 instructed to cite exact successful `source_url` values and disclose insufficient source coverage.
+For each successful source, Phase 8 extracts at most two query-relevant passages and assigns
+stable IDs such as `S1-E1`. Matching is explicitly lexical and never presented as proof that a
+passage entails a generated claim. A bounded comparison also identifies differing numeric values
+only when passages from separate sources share query terms. These entries are labelled
+`potential_numeric_disagreement`; they require source review and are not treated as verified
+contradictions. Distinct values are preserved so Ato can explain uncertainty rather than silently
+selecting whichever source appeared first.
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
