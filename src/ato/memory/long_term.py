@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 
 from ato.brain.memory import MemoryItem
@@ -44,6 +45,15 @@ SENSITIVE_PATTERN = re.compile(
 )
 
 
+class MemoryCategory(StrEnum):
+    """User-visible categories for durable personal context."""
+
+    FACT = "fact"
+    PREFERENCE = "preference"
+    PROJECT = "project"
+    DECISION = "decision"
+
+
 class SqliteLongTermMemory:
     """Store explicit facts locally and retrieve them without embeddings."""
 
@@ -51,35 +61,71 @@ class SqliteLongTermMemory:
         self.path = path
         self._initialize()
 
-    def remember(self, content: str) -> MemoryItem:
+    def remember(
+        self, content: str, category: MemoryCategory | str = MemoryCategory.FACT
+    ) -> MemoryItem:
         """Persist one explicit, non-sensitive user fact."""
-        cleaned = " ".join(content.split())
-        if not cleaned:
-            raise MemoryStoreError("Long-term memory cannot be empty.")
-        if len(cleaned) > MAX_FACT_CHARS:
-            raise MemoryStoreError(f"Long-term memory exceeds {MAX_FACT_CHARS} characters.")
-        if SENSITIVE_PATTERN.search(cleaned):
-            raise MemoryStoreError(
-                "Refusing to store a possible password, API key, token, or secret."
-            )
+        cleaned = _validate_content(content)
+        normalized_category = _validate_category(category)
         try:
             with self._connect() as connection:
                 existing = connection.execute(
-                    "SELECT id FROM memories WHERE content = ?", (cleaned,)
+                    "SELECT id, category FROM memories WHERE content = ?", (cleaned,)
                 ).fetchone()
                 if existing is not None:
-                    return MemoryItem(int(existing[0]), cleaned)
+                    return _memory_item(int(existing[0]), cleaned, str(existing[1]))
                 count = connection.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= MAX_STORED_FACTS:
                     raise MemoryStoreError("Long-term memory has reached its storage limit.")
                 cursor = connection.execute(
-                    "INSERT INTO memories(content, created_at) VALUES (?, ?)",
-                    (cleaned, datetime.now(UTC).isoformat()),
+                    "INSERT INTO memories(content, category, created_at) VALUES (?, ?, ?)",
+                    (cleaned, normalized_category.value, datetime.now(UTC).isoformat()),
                 )
                 memory_id = int(cursor.lastrowid)
         except sqlite3.Error as exc:
             raise MemoryStoreError("Could not save long-term memory.") from exc
-        return MemoryItem(memory_id, cleaned)
+        return _memory_item(memory_id, cleaned, normalized_category)
+
+    def update(
+        self,
+        memory_id: int,
+        content: str,
+        category: MemoryCategory | str | None = None,
+    ) -> MemoryItem | None:
+        """Replace one explicitly selected fact while preserving its identifier."""
+        if memory_id < 1:
+            raise ValueError("memory_id must be positive.")
+        cleaned = _validate_content(content)
+        normalized_category = None if category is None else _validate_category(category)
+        try:
+            with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT id FROM memories WHERE content = ? AND id != ?",
+                    (cleaned, memory_id),
+                ).fetchone()
+                if existing is not None:
+                    raise MemoryStoreError(
+                        f"That fact is already stored as memory {int(existing[0])}."
+                    )
+                current = connection.execute(
+                    "SELECT category FROM memories WHERE id = ?", (memory_id,)
+                ).fetchone()
+                if current is None:
+                    return None
+                selected_category = (
+                    normalized_category.value
+                    if normalized_category is not None
+                    else str(current[0])
+                )
+                connection.execute(
+                    "UPDATE memories SET content = ?, category = ? WHERE id = ?",
+                    (cleaned, selected_category, memory_id),
+                )
+        except MemoryStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise MemoryStoreError("Could not update long-term memory.") from exc
+        return _memory_item(memory_id, cleaned, selected_category)
 
     def list_memories(self, limit: int = 50) -> tuple[MemoryItem, ...]:
         """List recent durable facts in newest-first order."""
@@ -88,11 +134,11 @@ class SqliteLongTermMemory:
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    "SELECT id, content FROM memories ORDER BY id DESC LIMIT ?", (limit,)
+                    "SELECT id, content, category FROM memories ORDER BY id DESC LIMIT ?", (limit,)
                 ).fetchall()
         except sqlite3.Error as exc:
             raise MemoryStoreError("Could not list long-term memories.") from exc
-        return tuple(MemoryItem(int(row[0]), str(row[1])) for row in rows)
+        return tuple(_memory_item(int(row[0]), str(row[1]), str(row[2])) for row in rows)
 
     def forget(self, memory_id: int) -> bool:
         """Delete one explicitly selected fact by identifier."""
@@ -117,7 +163,7 @@ class SqliteLongTermMemory:
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    "SELECT id, content FROM memories ORDER BY id DESC LIMIT ?",
+                    "SELECT id, content, category FROM memories ORDER BY id DESC LIMIT ?",
                     (MAX_SEARCH_CANDIDATES,),
                 ).fetchall()
         except sqlite3.Error as exc:
@@ -125,7 +171,7 @@ class SqliteLongTermMemory:
 
         ranked: list[tuple[float, int, MemoryItem]] = []
         for row in rows:
-            item = MemoryItem(int(row[0]), str(row[1]))
+            item = _memory_item(int(row[0]), str(row[1]), str(row[2]))
             terms = {
                 term
                 for term in WORD_PATTERN.findall(item.content.casefold())
@@ -146,10 +192,45 @@ class SqliteLongTermMemory:
                     "CREATE TABLE IF NOT EXISTS memories ("
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                     "content TEXT NOT NULL UNIQUE, "
+                    "category TEXT NOT NULL DEFAULT 'fact', "
                     "created_at TEXT NOT NULL)"
                 )
+                columns = {
+                    str(row[1]) for row in connection.execute("PRAGMA table_info(memories)")
+                }
+                if "category" not in columns:
+                    connection.execute(
+                        "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'fact'"
+                    )
         except (OSError, sqlite3.Error) as exc:
             raise MemoryStoreError("Could not initialize long-term memory.") from exc
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=5)
+
+
+def _validate_content(content: str) -> str:
+    """Normalize and validate a fact before it enters durable memory."""
+    cleaned = " ".join(content.split())
+    if not cleaned:
+        raise MemoryStoreError("Long-term memory cannot be empty.")
+    if len(cleaned) > MAX_FACT_CHARS:
+        raise MemoryStoreError(f"Long-term memory exceeds {MAX_FACT_CHARS} characters.")
+    if SENSITIVE_PATTERN.search(cleaned):
+        raise MemoryStoreError("Refusing to store a possible password, API key, token, or secret.")
+    return cleaned
+
+
+def _validate_category(category: MemoryCategory | str) -> MemoryCategory:
+    try:
+        return MemoryCategory(str(category).strip().casefold())
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in MemoryCategory)
+        raise MemoryStoreError(f"Memory category must be one of: {allowed}.") from exc
+
+
+def _memory_item(
+    memory_id: int, content: str, category: MemoryCategory | str
+) -> MemoryItem:
+    normalized = _validate_category(category)
+    return MemoryItem(memory_id, content, f"long-term memory:{normalized.value}")

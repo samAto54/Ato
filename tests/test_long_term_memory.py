@@ -1,7 +1,9 @@
+import sqlite3
+
 import pytest
 
 from ato.exceptions import MemoryStoreError
-from ato.memory import SqliteLongTermMemory
+from ato.memory import MemoryCategory, SqliteLongTermMemory
 
 
 def test_long_term_memory_persists_retrieves_and_forgets(tmp_path) -> None:
@@ -27,3 +29,60 @@ def test_long_term_memory_rejects_likely_secrets(tmp_path, content: str) -> None
 
     with pytest.raises(MemoryStoreError, match="Refusing"):
         store.remember(content)
+
+
+def test_long_term_memory_updates_existing_fact_and_search_index(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    memory = store.remember("I live in Kumasi.")
+
+    updated = store.update(memory.id, "I now live in Accra.")
+
+    assert updated is not None
+    assert updated.id == memory.id
+    assert store.search("Kumasi") == ()
+    assert store.search("Where do I live?") == (updated,)
+
+
+def test_long_term_memory_update_is_bounded_and_deduplicated(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    first = store.remember("My favorite color is green.")
+    second = store.remember("I live in Accra.")
+
+    assert store.update(999, "A harmless fact.") is None
+    with pytest.raises(MemoryStoreError, match=f"memory {first.id}"):
+        store.update(second.id, first.content)
+    with pytest.raises(MemoryStoreError, match="Refusing"):
+        store.update(second.id, "My password is hunter2")
+
+    assert store.list_memories() == (second, first)
+
+
+def test_long_term_memory_categories_are_persisted_and_editable(tmp_path) -> None:
+    path = tmp_path / "facts.db"
+    store = SqliteLongTermMemory(path)
+    preference = store.remember("I prefer concise answers.", MemoryCategory.PREFERENCE)
+
+    restored = SqliteLongTermMemory(path)
+    assert preference.source == "long-term memory:preference"
+    assert restored.search("How do I prefer answers?") == (preference,)
+
+    updated = restored.update(preference.id, preference.content, MemoryCategory.DECISION)
+    assert updated is not None
+    assert updated.source == "long-term memory:decision"
+
+    with pytest.raises(MemoryStoreError, match="category"):
+        restored.remember("Uncategorized content", "unknown")
+
+
+def test_long_term_memory_migrates_existing_database_to_fact_category(tmp_path) -> None:
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "content TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)"
+        )
+        connection.execute("INSERT INTO memories VALUES (1, 'Legacy fact', 'timestamp')")
+
+    store = SqliteLongTermMemory(path)
+
+    assert store.list_memories()[0].source == "long-term memory:fact"

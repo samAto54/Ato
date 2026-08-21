@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 5 build provides:
+The current Phase 7 build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -15,6 +15,8 @@ The current Phase 5 build provides:
 - Configurable context budgeting with deterministic compaction of older turns
 - Persisted summaries with recent messages retained verbatim
 - Explicit SQLite long-term facts with bounded relevance retrieval
+- Confirmed correction and deletion of individual long-term memories by ID
+- Categorized long-term memory for facts, preferences, projects, and decisions
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
@@ -221,8 +223,14 @@ version-2 memory format and injected as context, never as a fabricated assistant
 Existing version-1 memory files migrate automatically when next saved.
 
 Long-term memory is separate from conversation history. Use `/remember <fact>` to
-save a user-approved fact, `/memories` to list saved facts, and `/forget <id>` to
-delete one after confirmation. Relevant facts are retrieved with bounded local
+save a user-approved fact, `/memories` to list saved facts, `/edit-memory <id> <fact>`
+to correct one after confirmation, and `/forget <id>` to delete one after confirmation.
+Prefix new or edited content with `preference:`, `project:`, `decision:`, or `fact:` to
+categorize it; content without a recognized prefix remains a fact. Existing memory databases
+migrate automatically and classify older entries as facts.
+Edits preserve the memory ID while replacing its searchable content; duplicate facts and
+the same sensitive-content patterns rejected during creation are also rejected during edits.
+Relevant facts are retrieved with bounded local
 keyword matching and injected as data rather than instructions. Likely passwords,
 API keys, tokens, and secrets are rejected. The SQLite database is local plain text,
 is excluded from Git, and should be protected using normal operating-system access controls.
