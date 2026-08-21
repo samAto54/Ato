@@ -46,6 +46,7 @@ LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
 VOICE_PREFIX = "/voice "
 SPEAK_LAST_COMMAND = "/speak-last"
+COPY_LAST_COMMAND = "/copy-last"
 
 HELP_TEXT = """Ato terminal commands:
   /help                              Show this command reference
@@ -66,6 +67,7 @@ HELP_TEXT = """Ato terminal commands:
   /remove-document <id>              Remove a document after confirmation
   /voice <seconds>                   Record and review a voice turn (1-120 seconds)
   /speak-last                        Speak the latest assistant reply
+  /copy-last                         Copy the latest assistant reply
   exit | quit                        Close Ato
 
 Some commands require configured optional providers or confirmation."""
@@ -147,17 +149,10 @@ def run_terminal(
                 write(f"  {message.role.value}: {content}")
             continue
         if user_input.lower() == SPEAK_LAST_COMMAND:
-            if tool_registry is None:
+            if tool_registry is None or not tool_registry.has_tool("speak_text"):
                 write("Ato error: Voice tools are unavailable.")
                 continue
-            last_reply = next(
-                (
-                    message.content
-                    for message in reversed(agent.conversation)
-                    if message.role is Role.ASSISTANT
-                ),
-                None,
-            )
+            last_reply = _latest_assistant_reply(agent)
             if last_reply is None:
                 write("Ato error: There is no assistant reply to speak yet.")
                 continue
@@ -171,6 +166,25 @@ def run_terminal(
                 write(f"Ato error: {exc}")
             else:
                 write("Ato: Finished speaking the latest reply.")
+            continue
+        if user_input.lower() == COPY_LAST_COMMAND:
+            if tool_registry is None or not tool_registry.has_tool("write_clipboard"):
+                write("Ato error: Clipboard writing is unavailable.")
+                continue
+            last_reply = _latest_assistant_reply(agent)
+            if last_reply is None:
+                write("Ato error: There is no assistant reply to copy yet.")
+                continue
+            try:
+                tool_registry.execute(
+                    "write_clipboard",
+                    {"text": last_reply},
+                    user_request=user_input,
+                )
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Copied the latest reply to the clipboard.")
             continue
         if user_input.lower().startswith(VOICE_PREFIX):
             if tool_registry is None:
@@ -504,6 +518,17 @@ def _write_terminal_chunk(text: str) -> None:
 
 def _status(available: bool) -> str:
     return "ready" if available else "not configured"
+
+
+def _latest_assistant_reply(agent: Agent) -> str | None:
+    return next(
+        (
+            message.content
+            for message in reversed(agent.conversation)
+            if message.role is Role.ASSISTANT
+        ),
+        None,
+    )
 
 
 def _deliver_agent_turn(
