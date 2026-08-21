@@ -30,6 +30,7 @@ from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpee
 EXIT_COMMANDS = {"exit", "quit"}
 HELP_COMMAND = "/help"
 STATUS_COMMAND = "/status"
+HISTORY_COMMAND = "/history"
 CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
@@ -49,6 +50,7 @@ SPEAK_LAST_COMMAND = "/speak-last"
 HELP_TEXT = """Ato terminal commands:
   /help                              Show this command reference
   /status                            Show local subsystem availability
+  /history                           Show recent conversation messages
   /clear-memory                      Clear conversation history
   /remember [category:] <text>       Save a long-term memory
   /memories                          List active long-term memories
@@ -127,6 +129,22 @@ def run_terminal(
                 f"  voice input: {_status(voice_input_ready)}\n"
                 f"  voice output: {_status(voice_output_ready)}"
             )
+            continue
+        if user_input.lower() == HISTORY_COMMAND:
+            messages = agent.conversation
+            if not messages:
+                write("Ato: No conversation messages yet.")
+                continue
+            visible = messages[-20:]
+            omitted = len(messages) - len(visible)
+            write("Ato recent conversation:")
+            if omitted:
+                write(f"  ... {omitted} older messages omitted")
+            for message in visible:
+                content = " ".join(message.content.split())
+                if len(content) > 200:
+                    content = f"{content[:197]}..."
+                write(f"  {message.role.value}: {content}")
             continue
         if user_input.lower() == SPEAK_LAST_COMMAND:
             if tool_registry is None:
