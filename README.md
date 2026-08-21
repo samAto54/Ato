@@ -71,6 +71,7 @@ The current build provides:
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
 - A provider-neutral `LLMClient` interface
+- Built-in Standard and original Ato HUD desktop theme palettes with an allowlisted toggle
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -99,7 +100,7 @@ ato/
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
-|   |-- ui/             # Terminal plus shared bounded views for future interfaces
+|   |-- ui/             # Terminal, shared bounded views, and original desktop theme palettes
 |   |-- voice/          # Bounded recording, transcription, and speech providers
 |   |-- config.py       # Environment configuration
 |   |-- exceptions.py   # Application-specific errors
