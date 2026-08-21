@@ -7,6 +7,7 @@ from ato.voice.base import (
     validate_synthesis_text,
 )
 from ato.voice.microphone import MicrophoneRecorder, SoundDeviceRecorder
+from ato.voice.whisper import FasterWhisperTranscriber, FileTranscriber
 from ato.voice.windows import WindowsSpeechPlayer
 
 __all__ = [
@@ -15,6 +16,8 @@ __all__ = [
     "SpeechSynthesizer",
     "SoundDeviceRecorder",
     "MicrophoneRecorder",
+    "FasterWhisperTranscriber",
+    "FileTranscriber",
     "WindowsSpeechPlayer",
     "validate_synthesis_text",
 ]

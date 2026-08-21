@@ -36,7 +36,12 @@ from ato.tools.research import WebResearchCoordinator
 from ato.tools.search import WebSearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
-from ato.voice import MicrophoneRecorder, WindowsSpeechPlayer, validate_synthesis_text
+from ato.voice import (
+    FileTranscriber,
+    MicrophoneRecorder,
+    WindowsSpeechPlayer,
+    validate_synthesis_text,
+)
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 MAX_LIST_RESULTS = 200
@@ -122,6 +127,7 @@ def build_phase3_registry(
     process_monitor: ProcessMonitor | None = None,
     speech_player: WindowsSpeechPlayer | None = None,
     microphone_recorder: MicrophoneRecorder | None = None,
+    transcriber: FileTranscriber | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -575,6 +581,17 @@ def build_phase3_registry(
                 "path": path.relative_to(boundary.root).as_posix(),
             }
         )
+
+    def transcribe_audio(arguments: Mapping[str, Any]) -> str:
+        assert transcriber is not None
+        path = boundary.resolve(str(arguments["path"]))
+        relative = path.relative_to(boundary.root)
+        if relative.parts[:2] != ("data", "audio") or path.suffix.casefold() != ".wav":
+            raise ToolError("Transcription is restricted to WAV files under data/audio/.")
+        if not path.is_file() or path.stat().st_size > MAX_TEXT_BYTES * 100:
+            raise ToolError("Audio file is missing or exceeds the 10 MB limit.")
+        transcript = transcriber.transcribe_file(path)
+        return json.dumps({"path": relative.as_posix(), "transcript": transcript, "offline": True})
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
         assert github_client is not None
@@ -1438,6 +1455,24 @@ def build_phase3_registry(
                 },
                 handler=record_microphone,
                 permission=PermissionLevel.CRITICAL,
+            )
+        )
+    if transcriber is not None:
+        registry.register(
+            ToolSpec(
+                name="transcribe_audio",
+                description=(
+                    "Transcribe one bounded WAV under data/audio using an explicitly local model "
+                    "after HIGH confirmation. Never uploads audio."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string", "minLength": 1, "maxLength": 500}},
+                    "required": ["path"],
+                    "additionalProperties": False,
+                },
+                handler=transcribe_audio,
+                permission=PermissionLevel.HIGH,
             )
         )
     registry.register(
