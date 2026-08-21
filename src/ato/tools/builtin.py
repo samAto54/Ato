@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from ato.coding import SqliteEditCheckpointStore
-from ato.computer import ClipboardWriter, validate_clipboard_text
+from ato.computer import ApplicationLauncher, ClipboardWriter, validate_clipboard_text
 from ato.exceptions import CheckpointStoreError, ToolError
 from ato.notifications import Notification, Notifier
 from ato.research import SqliteResearchStore
@@ -112,6 +112,7 @@ def build_phase3_registry(
     github_client: GitHubClient | None = None,
     notifier: Notifier | None = None,
     clipboard_writer: ClipboardWriter | None = None,
+    application_launcher: ApplicationLauncher | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -513,6 +514,14 @@ def build_phase3_registry(
         summary = validate_clipboard_text(text)
         clipboard_writer.write(text)
         return json.dumps({"written": True, "provider": "windows", **summary})
+
+    def launch_application(arguments: Mapping[str, Any]) -> str:
+        assert application_launcher is not None
+        application = str(arguments["application"])
+        process_id = application_launcher.launch(application)
+        return json.dumps(
+            {"launched": True, "application": application, "process_id": process_id}
+        )
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
         assert github_client is not None
@@ -1290,6 +1299,29 @@ def build_phase3_registry(
                     "additionalProperties": False,
                 },
                 handler=write_clipboard,
+                permission=PermissionLevel.HIGH,
+            )
+        )
+    if application_launcher is not None:
+        registry.register(
+            ToolSpec(
+                name="launch_application",
+                description=(
+                    "Launch one fixed argument-free Windows application profile after HIGH "
+                    "confirmation. Cannot open a path, file, or URL."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "application": {
+                            "type": "string",
+                            "enum": ["notepad", "calculator", "file_explorer"],
+                        }
+                    },
+                    "required": ["application"],
+                    "additionalProperties": False,
+                },
+                handler=launch_application,
                 permission=PermissionLevel.HIGH,
             )
         )

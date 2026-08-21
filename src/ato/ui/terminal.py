@@ -11,7 +11,7 @@ from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
 from ato.coding import SqliteEditCheckpointStore
-from ato.computer import WindowsClipboardWriter
+from ato.computer import WindowsApplicationLauncher, WindowsClipboardWriter
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
@@ -445,6 +445,7 @@ def main() -> None:
             ),
             notifier=TerminalNotifier(),
             clipboard_writer=WindowsClipboardWriter(),
+            application_launcher=WindowsApplicationLauncher(),
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")

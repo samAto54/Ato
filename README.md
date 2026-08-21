@@ -42,6 +42,7 @@ The current Phase 9 build provides:
 - Preview-guarded pull-request creation between existing same-repository branches
 - Provider-neutral notifications with confirmed, clearly labelled terminal delivery
 - HIGH-confirmation, write-only Windows clipboard support with secret rejection
+- HIGH-confirmation launching of three fixed, argument-free Windows applications
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -212,6 +213,14 @@ Likely API keys, bearer tokens, passwords, private keys, unsupported control cha
 oversized content are rejected. Audit records contain only the text length and SHA-256 digest.
 Ato cannot read the clipboard, see or preserve its previous value, restore overwritten clipboard
 content, handle images, or synchronize the clipboard externally.
+
+Controlled application launching is limited to `notepad`, `calculator`, and `file_explorer`.
+`launch_application` requires `HIGH` confirmation and maps those names internally to one fixed
+argument-free executable each. It accepts no executable path, file path, directory, URL, document,
+or command argument. Processes start with `shell=False`, detached standard streams, and no command
+interpolation. A returned process ID only confirms that Windows accepted process creation; it does
+not prove the application stayed open or became responsive. Ato cannot launch other applications,
+type or click inside an application, monitor its state, or terminate it in this phase.
 
 ## Run Ato
 
