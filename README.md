@@ -32,6 +32,7 @@ The current Phase 9 build provides:
 - Local research-session history and confirmed, non-overwriting Markdown evidence exports
 - Read-only unified-diff previews with SHA-256-guarded exact text edits
 - One-confirmation, non-fixing syntax/lint/test verification with isolated step results
+- Recoverable, one-time text-edit checkpoints with SHA-256-guarded rollback
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -136,6 +137,8 @@ ATO_CONTEXT_RECENT_MESSAGES=12
 ATO_CONTEXT_SUMMARY_MAX_CHARS=6000
 ATO_LONG_TERM_MEMORY_FILE=data/long_term_memory.db
 ATO_KNOWLEDGE_FILE=data/knowledge.db
+ATO_RESEARCH_FILE=data/research.db
+ATO_EDIT_CHECKPOINT_FILE=data/edit_checkpoints.db
 ATO_WORKSPACE_ROOT=.
 ATO_AUDIT_FILE=data/audit.jsonl
 ```
@@ -354,7 +357,14 @@ The first editing tools are deliberately narrow:
 - `preview_text_change` validates one unique match and returns a read-only unified diff capped
   at 10,000 characters, plus original and proposed SHA-256 digests.
 - `replace_text_in_file` changes that exact block only when supplied with the preview's original
-  digest. If the file changed after review, the edit fails and requires a fresh preview.
+  digest. If the file changed after review, the edit fails and requires a fresh preview. In the
+  configured application it also saves the original bounded content to ignored local checkpoint
+  storage before writing and returns a `checkpoint_id`.
+- `list_edit_checkpoints` exposes bounded checkpoint metadata without original file content.
+- `rollback_text_edit` requires `HIGH` confirmation and restores one checkpoint atomically only
+  when the current file still matches the edit's resulting digest. It refuses protected paths,
+  newer changes, missing files, unknown IDs, and checkpoints that were already restored. It does
+  not invoke Git reset, checkout, or any other destructive repository operation.
 - The two writing tools require `HIGH` confirmation, use atomic writes, and cap files at
   100,000 bytes; previewing remains read-only and `LOW` permission.
 - Environment, credential, private-key, Git metadata, CI workflow, runtime data, symlink,

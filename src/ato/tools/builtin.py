@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ato.coding import SqliteEditCheckpointStore
 from ato.exceptions import ToolError
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
@@ -100,6 +101,7 @@ def build_phase3_registry(
     web_fetcher: Callable[[str], str] | None = None,
     web_searcher: WebSearchClient | None = None,
     research_store: SqliteResearchStore | None = None,
+    checkpoint_store: SqliteEditCheckpointStore | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -497,16 +499,26 @@ def build_phase3_registry(
         encoded = updated.encode("utf-8")
         if len(encoded) > MAX_WRITE_BYTES:
             raise ToolError(f"Modified file exceeds the {MAX_WRITE_BYTES}-byte limit.")
+        updated_sha256 = hashlib.sha256(encoded).hexdigest()
+        relative = path.relative_to(boundary.root).as_posix()
+        checkpoint = (
+            checkpoint_store.create(
+                relative, original, original_sha256, updated_sha256
+            )
+            if checkpoint_store is not None
+            else None
+        )
         try:
             _atomic_replace_text(path, updated)
         except OSError as exc:
             raise ToolError("The text file could not be modified atomically.") from exc
         return json.dumps(
             {
-                "path": path.relative_to(boundary.root).as_posix(),
+                "path": relative,
                 "bytes": len(encoded),
                 "original_sha256": original_sha256,
-                "updated_sha256": hashlib.sha256(encoded).hexdigest(),
+                "updated_sha256": updated_sha256,
+                "checkpoint_id": None if checkpoint is None else checkpoint.id,
             }
         )
 
@@ -554,7 +566,62 @@ def build_phase3_registry(
         occurrences = original.count(old_text)
         if occurrences != 1:
             raise ToolError(f"old_text must match exactly once; found {occurrences} matches.")
-        return original.replace(old_text, new_text, 1)
+        updated = original.replace(old_text, new_text, 1)
+        if updated == original:
+            raise ToolError("Replacement would not change the file.")
+        return updated
+
+    def list_edit_checkpoints(arguments: Mapping[str, Any]) -> str:
+        assert checkpoint_store is not None
+        records = checkpoint_store.list_checkpoints(int(arguments.get("limit", 20)))
+        return json.dumps(
+            {
+                "checkpoints": [
+                    {
+                        "id": record.id,
+                        "path": record.path,
+                        "original_sha256": record.original_sha256,
+                        "updated_sha256": record.updated_sha256,
+                        "created_at": record.created_at,
+                        "restored": record.restored_at is not None,
+                    }
+                    for record in records
+                ]
+            }
+        )
+
+    def rollback_text_edit(arguments: Mapping[str, Any]) -> str:
+        assert checkpoint_store is not None
+        checkpoint_id = int(arguments["checkpoint_id"])
+        checkpoint = checkpoint_store.load(checkpoint_id)
+        if checkpoint is None:
+            raise ToolError("Edit checkpoint ID was not found.")
+        record = checkpoint.record
+        if record.restored_at is not None:
+            raise ToolError("Edit checkpoint has already been restored.")
+        path = boundary.write_target(record.path)
+        current = _read_modifiable_text(path)
+        current_sha256 = hashlib.sha256(current.encode("utf-8")).hexdigest()
+        if current_sha256 != record.updated_sha256:
+            raise ToolError(
+                "File changed after the checkpointed edit; rollback will not overwrite newer work."
+            )
+        original_encoded = checkpoint.original_content.encode("utf-8")
+        if hashlib.sha256(original_encoded).hexdigest() != record.original_sha256:
+            raise ToolError("Edit checkpoint content failed SHA-256 verification.")
+        try:
+            _atomic_replace_text(path, checkpoint.original_content)
+        except OSError as exc:
+            raise ToolError("Checkpoint rollback could not restore the file atomically.") from exc
+        if not checkpoint_store.mark_restored(checkpoint_id):
+            raise ToolError("Checkpoint rollback state could not be finalized safely.")
+        return json.dumps(
+            {
+                "checkpoint_id": checkpoint_id,
+                "path": record.path,
+                "restored_sha256": record.original_sha256,
+            }
+        )
 
     def trash_text_file(arguments: Mapping[str, Any]) -> str:
         path = boundary.write_target(str(arguments["path"]))
@@ -605,6 +672,39 @@ def build_phase3_registry(
             permission=PermissionLevel.LOW,
         )
     )
+    if checkpoint_store is not None:
+        registry.register(
+            ToolSpec(
+                name="list_edit_checkpoints",
+                description="List bounded recoverable edit checkpoint metadata without content.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+                    },
+                    "additionalProperties": False,
+                },
+                handler=list_edit_checkpoints,
+                permission=PermissionLevel.LOW,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="rollback_text_edit",
+                description=(
+                    "Restore one checkpointed text edit after HIGH confirmation. Refuses stale "
+                    "files, protected paths, and previously restored checkpoints."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {"checkpoint_id": {"type": "integer", "minimum": 1}},
+                    "required": ["checkpoint_id"],
+                    "additionalProperties": False,
+                },
+                handler=rollback_text_edit,
+                permission=PermissionLevel.HIGH,
+            )
+        )
     registry.register(
         ToolSpec(
             name="list_files",

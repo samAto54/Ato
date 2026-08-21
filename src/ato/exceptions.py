@@ -25,6 +25,10 @@ class ResearchStoreError(AtoError):
     """Raised when persisted research sessions cannot be managed safely."""
 
 
+class CheckpointStoreError(AtoError):
+    """Raised when recoverable edit checkpoints cannot be managed safely."""
+
+
 class ContextWindowError(AtoError):
     """Raised when recent content cannot fit safely inside the context budget."""
 
