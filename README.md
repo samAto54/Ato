@@ -99,7 +99,7 @@ ato/
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
-|   |-- ui/             # Terminal and future user interfaces
+|   |-- ui/             # Terminal plus shared bounded views for future interfaces
 |   |-- voice/          # Bounded recording, transcription, and speech providers
 |   |-- config.py       # Environment configuration
 |   |-- exceptions.py   # Application-specific errors
