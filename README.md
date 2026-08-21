@@ -293,7 +293,10 @@ The first editing tools are deliberately narrow:
   hostnames and labels network state as `not_probed` rather than making outbound requests.
 
 DeepSeek may request a registered tool, but Ato's Python code validates the tool name
-and arguments and performs the operation. Lint and test execution accepts no command
+and arguments and performs the operation. The registry rejects unknown or missing fields,
+incorrect types (including booleans passed as integers), disallowed enum values, oversized
+strings or arrays, duplicate array items, and values outside declared numeric bounds before
+permission checks or tool execution. Lint and test execution accepts no command
 arguments, runs without a shell, and has strict time and output limits. There is no
 general shell, Git push/pull/reset/branch-switching, recursive/permanent deletion,
 unrestricted overwrite, or arbitrary Python-execution capability.

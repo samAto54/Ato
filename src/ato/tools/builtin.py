@@ -479,7 +479,7 @@ def build_phase3_registry(
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {"type": "string", "minLength": 1, "maxLength": 1000},
                     "path": {"type": "string"},
                     "case_sensitive": {"type": "boolean"},
                 },
@@ -525,7 +525,9 @@ def build_phase3_registry(
             description="Show a bounded, concise Git commit history.",
             parameters={
                 "type": "object",
-                "properties": {"max_count": {"type": "integer"}},
+                "properties": {
+                    "max_count": {"type": "integer", "minimum": 1, "maximum": 50}
+                },
                 "additionalProperties": False,
             },
             handler=git_log,
@@ -551,8 +553,14 @@ def build_phase3_registry(
             parameters={
                 "type": "object",
                 "properties": {
-                    "paths": {"type": "array", "items": {"type": "string"}},
-                    "message": {"type": "string"},
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string", "minLength": 1},
+                        "minItems": 1,
+                        "maxItems": 20,
+                        "uniqueItems": True,
+                    },
+                    "message": {"type": "string", "minLength": 1, "maxLength": 200},
                 },
                 "required": ["paths", "message"],
                 "additionalProperties": False,
@@ -607,7 +615,7 @@ def build_phase3_registry(
             ),
             parameters={
                 "type": "object",
-                "properties": {"url": {"type": "string"}},
+                "properties": {"url": {"type": "string", "minLength": 1, "maxLength": 2048}},
                 "required": ["url"],
                 "additionalProperties": False,
             },
@@ -627,8 +635,8 @@ def build_phase3_registry(
                 parameters={
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string"},
-                        "count": {"type": "integer"},
+                        "query": {"type": "string", "minLength": 1, "maxLength": 400},
+                        "count": {"type": "integer", "minimum": 1, "maximum": 10},
                     },
                     "required": ["query"],
                     "additionalProperties": False,
