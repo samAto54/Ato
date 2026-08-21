@@ -5,7 +5,7 @@ import pytest
 from ato.exceptions import ToolError
 from ato.security.permissions import PermissionManager
 from ato.tools import build_phase3_registry
-from ato.tools.search import BraveSearchClient
+from ato.tools.search import BraveSearchClient, TavilySearchClient
 
 
 class FakeResponse:
@@ -23,8 +23,14 @@ class FakeConnection:
         self.requests = []
         self.closed = False
 
-    def request(self, method: str, path: str, headers: dict[str, str]) -> None:
-        self.requests.append((method, path, headers))
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self.requests.append((method, path, body, headers or {}))
 
     def getresponse(self) -> FakeResponse:
         return self.response
@@ -70,11 +76,53 @@ def test_brave_search_returns_bounded_untrusted_results_without_leaking_key() ->
             }
         ],
     }
-    method, path, headers = connection.requests[0]
+    method, path, body, headers = connection.requests[0]
     assert method == "GET"
+    assert body is None
     assert "q=Ato+AI+agent" in path
     assert headers["X-Subscription-Token"] == "secret-key"
     assert "secret-key" not in json.dumps(result)
+    assert connection.closed is True
+
+
+def test_tavily_search_uses_basic_mode_and_returns_untrusted_results() -> None:
+    connection = FakeConnection(
+        FakeResponse(
+            200,
+            {
+                "results": [
+                    {
+                        "title": "Tavily result",
+                        "url": "https://example.com/source",
+                        "content": "Bounded source content",
+                    }
+                ],
+                "usage": {"credits": 1},
+            },
+        )
+    )
+    client = TavilySearchClient(
+        "tvly-secret", connection_factory=lambda *args, **kwargs: connection
+    )
+
+    result = json.loads(client.search("latest Ato project", count=3))
+
+    assert result["provider"] == "tavily"
+    assert result["content_trust"] == "untrusted_external"
+    assert result["results"][0]["description"] == "Bounded source content"
+    method, path, body, headers = connection.requests[0]
+    assert method == "POST" and path == "/search"
+    request = json.loads(body)
+    assert request == {
+        "query": "latest Ato project",
+        "search_depth": "basic",
+        "max_results": 3,
+        "include_answer": False,
+        "include_raw_content": False,
+        "include_images": False,
+    }
+    assert headers["Authorization"] == "Bearer tvly-secret"
+    assert "tvly-secret" not in json.dumps(result)
     assert connection.closed is True
 
 
@@ -82,6 +130,16 @@ def test_brave_search_returns_bounded_untrusted_results_without_leaking_key() ->
 def test_brave_search_reports_provider_failures_safely(status: int) -> None:
     connection = FakeConnection(FakeResponse(status, {}))
     client = BraveSearchClient("key", connection_factory=lambda *args, **kwargs: connection)
+
+    with pytest.raises(ToolError):
+        client.search("Ato")
+    assert connection.closed is True
+
+
+@pytest.mark.parametrize("status", [401, 429, 500])
+def test_tavily_search_reports_provider_failures_safely(status: int) -> None:
+    connection = FakeConnection(FakeResponse(status, {}))
+    client = TavilySearchClient("key", connection_factory=lambda *args, **kwargs: connection)
 
     with pytest.raises(ToolError):
         client.search("Ato")

@@ -20,7 +20,7 @@ The current Phase 5 build provides:
 - Injection-resistant JSON retrieval context with source-label citation instructions
 - Confirmed, bounded public HTTPS page fetching with readable-text extraction
 - Injection-resistant external evidence labels and exact-URL citation instructions
-- Optional confirmed Brave web search with bounded, untrusted result snippets
+- Optional confirmed Tavily or Brave web search with bounded, untrusted result snippets
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -109,10 +109,12 @@ Copy the safe environment template:
 Copy-Item .env.example .env
 ```
 
-Edit `.env` and replace the DeepSeek placeholder with your key. The Brave key is optional:
+Edit `.env` and replace the DeepSeek placeholder with your key. Search keys are optional;
+Tavily is preferred when both are configured:
 
 ```dotenv
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
+TAVILY_API_KEY=your_tavily_api_key_here
 BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
 ATO_MODEL=deepseek-v4-flash
 ATO_MEMORY_FILE=data/memory.json
@@ -161,12 +163,15 @@ Fetched results include an exact `source_url` and an `untrusted_external` trust 
 system policy treats all webpage text as evidence rather than instructions, ignores action
 requests embedded in pages, and requires the exact URL when an answer relies on that evidence.
 
-When `BRAVE_SEARCH_API_KEY` is configured, Ato also registers `web_search`. Each query requires
-`MEDIUM` confirmation because it sends the query to Brave and may consume API allowance. Search
-is limited to ten results and Brave's 400-character/50-word query limits. Returned titles,
-URLs, and descriptions are labelled untrusted; Ato is instructed to fetch relevant pages before
-making detailed claims. Create and protect the key according to the
-[official Brave Search API quickstart](https://api-dashboard.search.brave.com/documentation/quickstart).
+When `TAVILY_API_KEY` or `BRAVE_SEARCH_API_KEY` is configured, Ato registers `web_search`.
+Tavily is selected first when both exist. Each query requires `MEDIUM` confirmation because it
+sends the query to an external provider and consumes API allowance. Search is limited to ten
+results and Ato's conservative 400-character/50-word query limits. Tavily requests explicitly
+use basic search, disable generated answers, raw content, images, and automatic advanced mode,
+so a normal request costs one free-plan credit. Returned titles, URLs, and descriptions are
+labelled untrusted; Ato is instructed to fetch relevant pages before making detailed claims.
+See the [Tavily Search API reference](https://docs.tavily.com/documentation/api-reference/endpoint/search)
+or [Brave Search quickstart](https://api-dashboard.search.brave.com/documentation/quickstart).
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:
@@ -177,11 +182,12 @@ python -m pytest tests/test_web_live.py -m live_network -v
 Remove-Item Env:ATO_RUN_LIVE_WEB_TESTS
 ```
 
-With `BRAVE_SEARCH_API_KEY` set in the current shell, the same opt-in switch can verify search:
+With your search key in `.env`, the same opt-in switch can verify Tavily without printing the
+secret. The test makes one basic search request and consumes one free-plan credit:
 
 ```powershell
 $env:ATO_RUN_LIVE_WEB_TESTS="1"
-python -m pytest tests/test_web_search_live.py -m live_network -v
+python -m pytest tests/test_web_search_live.py -m live_network -k tavily -v
 Remove-Item Env:ATO_RUN_LIVE_WEB_TESTS
 ```
 

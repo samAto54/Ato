@@ -16,7 +16,7 @@ from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
-from ato.tools.search import BraveSearchClient
+from ato.tools.search import BraveSearchClient, TavilySearchClient
 
 EXIT_COMMANDS = {"exit", "quit"}
 CLEAR_MEMORY_COMMAND = "/clear-memory"
@@ -245,9 +245,13 @@ def main() -> None:
             permission_manager=PermissionManager(confirm_tool),
             audit_logger=AuditLogger(settings.audit_file),
             web_searcher=(
-                BraveSearchClient(settings.brave_search_api_key)
-                if settings.brave_search_api_key
-                else None
+                TavilySearchClient(settings.tavily_api_key)
+                if settings.tavily_api_key
+                else (
+                    BraveSearchClient(settings.brave_search_api_key)
+                    if settings.brave_search_api_key
+                    else None
+                )
             ),
         )
     except AtoError as exc:

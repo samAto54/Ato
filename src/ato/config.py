@@ -27,6 +27,7 @@ class Settings:
     long_term_memory_file: Path = Path("data/long_term_memory.db")
     knowledge_file: Path = Path("data/knowledge.db")
     brave_search_api_key: str | None = None
+    tavily_api_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -48,6 +49,10 @@ class Settings:
         raw_brave_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
         brave_search_api_key = (
             None if raw_brave_key in {"", "your_brave_search_api_key_here"} else raw_brave_key
+        )
+        raw_tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
+        tavily_api_key = (
+            None if raw_tavily_key in {"", "your_tavily_api_key_here"} else raw_tavily_key
         )
 
         if not api_key or api_key == "your_deepseek_api_key_here":
@@ -93,4 +98,5 @@ class Settings:
             long_term_memory_file=long_term_memory_file,
             knowledge_file=knowledge_file,
             brave_search_api_key=brave_search_api_key,
+            tavily_api_key=tavily_api_key,
         )
