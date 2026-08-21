@@ -18,7 +18,12 @@ from typing import Any
 from uuid import uuid4
 
 from ato.coding import SqliteEditCheckpointStore
-from ato.computer import ApplicationLauncher, ClipboardWriter, validate_clipboard_text
+from ato.computer import (
+    ApplicationLauncher,
+    ClipboardWriter,
+    ProcessMonitor,
+    validate_clipboard_text,
+)
 from ato.exceptions import CheckpointStoreError, ToolError
 from ato.notifications import Notification, Notifier
 from ato.research import SqliteResearchStore
@@ -113,6 +118,7 @@ def build_phase3_registry(
     notifier: Notifier | None = None,
     clipboard_writer: ClipboardWriter | None = None,
     application_launcher: ApplicationLauncher | None = None,
+    process_monitor: ProcessMonitor | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -521,6 +527,30 @@ def build_phase3_registry(
         process_id = application_launcher.launch(application)
         return json.dumps(
             {"launched": True, "application": application, "process_id": process_id}
+        )
+
+    def inspect_processes(arguments: Mapping[str, Any]) -> str:
+        assert process_monitor is not None
+        processes = process_monitor.snapshot()
+        operation = str(arguments["operation"])
+        if operation == "status":
+            if "name" in arguments or "limit" in arguments:
+                raise ToolError("Process status does not accept name or limit.")
+            if "process_id" not in arguments:
+                raise ToolError("Process status requires process_id.")
+            process_id = int(arguments["process_id"])
+            match = next(
+                (process for process in processes if process["process_id"] == process_id), None
+            )
+            return json.dumps({"found": match is not None, "process": match})
+        if "process_id" in arguments:
+            raise ToolError("Process listing does not accept process_id.")
+        name = str(arguments.get("name", "")).casefold()
+        if name:
+            processes = [process for process in processes if name in process["name"].casefold()]
+        limit = int(arguments.get("limit", 50))
+        return json.dumps(
+            {"processes": processes[:limit], "truncated": len(processes) > limit}
         )
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
@@ -1323,6 +1353,29 @@ def build_phase3_registry(
                 },
                 handler=launch_application,
                 permission=PermissionLevel.HIGH,
+            )
+        )
+    if process_monitor is not None:
+        registry.register(
+            ToolSpec(
+                name="inspect_processes",
+                description=(
+                    "List bounded process capacity metadata or inspect one exact PID. Excludes "
+                    "users, paths, arguments, environment, windows, and network activity."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string", "enum": ["list", "status"]},
+                        "process_id": {"type": "integer", "minimum": 0},
+                        "name": {"type": "string", "minLength": 1, "maxLength": 100},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                    },
+                    "required": ["operation"],
+                    "additionalProperties": False,
+                },
+                handler=inspect_processes,
+                permission=PermissionLevel.MEDIUM,
             )
         )
     registry.register(
