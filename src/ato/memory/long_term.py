@@ -53,15 +53,7 @@ class SqliteLongTermMemory:
 
     def remember(self, content: str) -> MemoryItem:
         """Persist one explicit, non-sensitive user fact."""
-        cleaned = " ".join(content.split())
-        if not cleaned:
-            raise MemoryStoreError("Long-term memory cannot be empty.")
-        if len(cleaned) > MAX_FACT_CHARS:
-            raise MemoryStoreError(f"Long-term memory exceeds {MAX_FACT_CHARS} characters.")
-        if SENSITIVE_PATTERN.search(cleaned):
-            raise MemoryStoreError(
-                "Refusing to store a possible password, API key, token, or secret."
-            )
+        cleaned = _validate_content(content)
         try:
             with self._connect() as connection:
                 existing = connection.execute(
@@ -79,6 +71,32 @@ class SqliteLongTermMemory:
                 memory_id = int(cursor.lastrowid)
         except sqlite3.Error as exc:
             raise MemoryStoreError("Could not save long-term memory.") from exc
+        return MemoryItem(memory_id, cleaned)
+
+    def update(self, memory_id: int, content: str) -> MemoryItem | None:
+        """Replace one explicitly selected fact while preserving its identifier."""
+        if memory_id < 1:
+            raise ValueError("memory_id must be positive.")
+        cleaned = _validate_content(content)
+        try:
+            with self._connect() as connection:
+                existing = connection.execute(
+                    "SELECT id FROM memories WHERE content = ? AND id != ?",
+                    (cleaned, memory_id),
+                ).fetchone()
+                if existing is not None:
+                    raise MemoryStoreError(
+                        f"That fact is already stored as memory {int(existing[0])}."
+                    )
+                cursor = connection.execute(
+                    "UPDATE memories SET content = ? WHERE id = ?", (cleaned, memory_id)
+                )
+        except MemoryStoreError:
+            raise
+        except sqlite3.Error as exc:
+            raise MemoryStoreError("Could not update long-term memory.") from exc
+        if cursor.rowcount == 0:
+            return None
         return MemoryItem(memory_id, cleaned)
 
     def list_memories(self, limit: int = 50) -> tuple[MemoryItem, ...]:
@@ -153,3 +171,15 @@ class SqliteLongTermMemory:
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=5)
+
+
+def _validate_content(content: str) -> str:
+    """Normalize and validate a fact before it enters durable memory."""
+    cleaned = " ".join(content.split())
+    if not cleaned:
+        raise MemoryStoreError("Long-term memory cannot be empty.")
+    if len(cleaned) > MAX_FACT_CHARS:
+        raise MemoryStoreError(f"Long-term memory exceeds {MAX_FACT_CHARS} characters.")
+    if SENSITIVE_PATTERN.search(cleaned):
+        raise MemoryStoreError("Refusing to store a possible password, API key, token, or secret.")
+    return cleaned

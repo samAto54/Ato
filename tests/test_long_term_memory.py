@@ -27,3 +27,29 @@ def test_long_term_memory_rejects_likely_secrets(tmp_path, content: str) -> None
 
     with pytest.raises(MemoryStoreError, match="Refusing"):
         store.remember(content)
+
+
+def test_long_term_memory_updates_existing_fact_and_search_index(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    memory = store.remember("I live in Kumasi.")
+
+    updated = store.update(memory.id, "I now live in Accra.")
+
+    assert updated is not None
+    assert updated.id == memory.id
+    assert store.search("Kumasi") == ()
+    assert store.search("Where do I live?") == (updated,)
+
+
+def test_long_term_memory_update_is_bounded_and_deduplicated(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    first = store.remember("My favorite color is green.")
+    second = store.remember("I live in Accra.")
+
+    assert store.update(999, "A harmless fact.") is None
+    with pytest.raises(MemoryStoreError, match=f"memory {first.id}"):
+        store.update(second.id, first.content)
+    with pytest.raises(MemoryStoreError, match="Refusing"):
+        store.update(second.id, "My password is hunter2")
+
+    assert store.list_memories() == (second, first)

@@ -23,6 +23,7 @@ CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
 FORGET_PREFIX = "/forget "
+EDIT_MEMORY_PREFIX = "/edit-memory "
 INGEST_PREFIX = "/ingest "
 LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
@@ -127,6 +128,34 @@ def run_terminal(
             continue
         if user_input.lower() == FORGET_PREFIX.strip():
             write("Ato error: Use /forget followed by a numeric memory ID.")
+            continue
+        if user_input.lower().startswith(EDIT_MEMORY_PREFIX):
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            raw_edit = user_input[len(EDIT_MEMORY_PREFIX) :].strip()
+            raw_id, separator, content = raw_edit.partition(" ")
+            try:
+                memory_id = int(raw_id)
+            except ValueError:
+                write("Ato error: Use /edit-memory <id> <replacement fact>.")
+                continue
+            if not separator or not content.strip():
+                write("Ato error: Use /edit-memory <id> <replacement fact>.")
+                continue
+            confirmation = read(f"Replace long-term memory {memory_id}? [y/N]: ").strip().lower()
+            if confirmation not in {"y", "yes"}:
+                write("Ato: Memory edit cancelled.")
+                continue
+            try:
+                updated = long_term_memory.update(memory_id, content)
+            except (AtoError, ValueError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Memory updated." if updated else "Ato: Memory ID not found.")
+            continue
+        if user_input.lower() == EDIT_MEMORY_PREFIX.strip():
+            write("Ato error: Use /edit-memory <id> <replacement fact>.")
             continue
         if user_input.lower().startswith(INGEST_PREFIX):
             if knowledge_store is None:
