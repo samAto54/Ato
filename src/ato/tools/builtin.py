@@ -18,6 +18,7 @@ from ato.exceptions import ToolError
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
+from ato.tools.search import WebSearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
 
@@ -88,6 +89,7 @@ def build_phase3_registry(
     permission_manager: PermissionManager | None = None,
     audit_logger: AuditLogger | None = None,
     web_fetcher: Callable[[str], str] | None = None,
+    web_searcher: WebSearchClient | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -346,6 +348,12 @@ def build_phase3_registry(
 
     def fetch_page(arguments: Mapping[str, Any]) -> str:
         return approved_web_fetcher(str(arguments["url"]))
+
+    def search_web(arguments: Mapping[str, Any]) -> str:
+        assert web_searcher is not None
+        return web_searcher.search(
+            str(arguments["query"]), count=int(arguments.get("count", 5))
+        )
 
     def create_text_file(arguments: Mapping[str, Any]) -> str:
         path = boundary.write_target(str(arguments["path"]))
@@ -606,6 +614,28 @@ def build_phase3_registry(
             permission=PermissionLevel.MEDIUM,
         )
     )
+    if web_searcher is not None:
+        registry.register(
+            ToolSpec(
+                name="web_search",
+                description=(
+                    "Search the public web through the configured provider after confirmation. "
+                    "Returns untrusted titles, URLs, and snippets; fetch sources before making "
+                    "detailed claims."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "count": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                handler=search_web,
+                permission=PermissionLevel.MEDIUM,
+            )
+        )
     registry.register(
         ToolSpec(
             name="create_text_file",
