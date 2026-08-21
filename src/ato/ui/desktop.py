@@ -14,6 +14,7 @@ from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
+from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
@@ -150,6 +151,27 @@ class AtoDesktop:
             insertbackground=theme.accent,
             font=(theme.font_family, 11),
         )
+        self.transcript.tag_configure(
+            "role_you", foreground=theme.accent_secondary, font=(theme.heading_family, 10)
+        )
+        self.transcript.tag_configure(
+            "role_ato", foreground=theme.accent, font=(theme.heading_family, 10)
+        )
+        self.transcript.tag_configure(
+            ChatStyle.BODY.value, foreground=theme.text, font=(theme.font_family, 11)
+        )
+        self.transcript.tag_configure(
+            ChatStyle.HEADING.value, foreground=theme.accent, font=(theme.heading_family, 13)
+        )
+        self.transcript.tag_configure(
+            ChatStyle.BOLD.value, foreground=theme.text, font=(theme.heading_family, 11)
+        )
+        self.transcript.tag_configure(
+            ChatStyle.CODE.value,
+            foreground=theme.accent_secondary,
+            background=theme.input_background,
+            font=("Consolas", 10),
+        )
         self.input.configure(
             bg=theme.input_background,
             fg=theme.text,
@@ -174,7 +196,11 @@ class AtoDesktop:
 
     def _append(self, role: str, content: str) -> None:
         self.transcript.configure(state="normal")
-        self.transcript.insert("end", f"{role}\n{content}\n\n")
+        role_tag = "role_you" if role.casefold() in {"you", "user"} else "role_ato"
+        self.transcript.insert("end", f"{role.upper()}\n", role_tag)
+        for span in format_chat_content(content):
+            self.transcript.insert("end", span.text, span.style.value)
+        self.transcript.insert("end", "\n\n", ChatStyle.BODY.value)
         self.transcript.configure(state="disabled")
         self.transcript.see("end")
 
