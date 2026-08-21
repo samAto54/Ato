@@ -464,6 +464,10 @@ def run_terminal(
             continue
         if not user_input:
             continue
+        if user_input.startswith("/"):
+            command = user_input.split(maxsplit=1)[0]
+            write(f"Ato error: Unknown command {command}. Use /help to list commands.")
+            continue
 
         _deliver_agent_turn(
             agent,

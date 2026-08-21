@@ -11,6 +11,7 @@ The current build provides:
 - An interactive terminal conversation
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
 - A secret-free `/status` view of local memory, knowledge, tool, and voice availability
+- Local rejection of unknown slash commands with a `/help` hint and no model API request
 - Incremental streaming responses in the terminal
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -256,6 +257,9 @@ You can also run the installed `ato` command. Enter `exit` or `quit` to close.
 Enter `/help` to display the terminal command reference without making a model API request.
 Enter `/status` to check which local subsystems are ready or not configured. The status view does
 not call the model, probe the network, print provider credentials, or expose configured paths.
+Unknown input beginning with `/` is treated as a mistyped terminal command and rejected locally
+with a `/help` hint; it is not sent to the model. Reviewed voice transcripts bypass this parser and
+remain ordinary conversation text, even when their content starts with `/`.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
