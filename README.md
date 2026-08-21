@@ -33,6 +33,7 @@ The current Phase 9 build provides:
 - Read-only unified-diff previews with SHA-256-guarded exact text edits
 - One-confirmation, non-fixing syntax/lint/test verification with isolated step results
 - Recoverable, one-time text-edit checkpoints with SHA-256-guarded rollback
+- Guarded change sets for up to five files with one combined preview and confirmation
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -360,6 +361,14 @@ The first editing tools are deliberately narrow:
   digest. If the file changed after review, the edit fails and requires a fresh preview. In the
   configured application it also saves the original bounded content to ignored local checkpoint
   storage before writing and returns a `checkpoint_id`.
+- `preview_text_change_set` validates exact unique replacements across one to five distinct files
+  and returns one bounded combined diff, per-file digests, and a fingerprint for the complete set.
+- `apply_text_change_set` requires `HIGH` confirmation plus the reviewed set fingerprint and every
+  original file digest. It validates all files and prepares all temporary content before touching
+  a target. Configured runs create a checkpoint for each file. If a later replacement fails, Ato
+  attempts to restore every file already replaced and reports whether recovery was complete.
+  This reduces partial-change risk but is not an atomic transaction across multiple filesystem
+  entries; interruption or operating-system failure can still require checkpoint-based recovery.
 - `list_edit_checkpoints` exposes bounded checkpoint metadata without original file content.
 - `rollback_text_edit` requires `HIGH` confirmation and restores one checkpoint atomically only
   when the current file still matches the edit's resulting digest. It refuses protected paths,

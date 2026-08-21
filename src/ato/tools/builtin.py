@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from ato.coding import SqliteEditCheckpointStore
-from ato.exceptions import ToolError
+from ato.exceptions import CheckpointStoreError, ToolError
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
@@ -41,6 +41,7 @@ MAX_PREVIEW_DIFF_CHARS = 10_000
 MAX_VERIFY_PYTHON_FILES = 500
 MAX_VERIFY_SYNTAX_ERRORS = 20
 MAX_VERIFY_STEP_OUTPUT = 3_500
+MAX_CHANGE_SET_FILES = 5
 PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
 PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
@@ -548,6 +549,110 @@ def build_phase3_registry(
             }
         )
 
+    def preview_text_change_set(arguments: Mapping[str, Any]) -> str:
+        prepared = _prepare_change_set(arguments["changes"])
+        combined_diff = ""
+        for change in prepared:
+            combined_diff += "".join(
+                difflib.unified_diff(
+                    change["original"].splitlines(keepends=True),
+                    change["updated"].splitlines(keepends=True),
+                    fromfile=f"a/{change['relative']}",
+                    tofile=f"b/{change['relative']}",
+                )
+            )
+        truncated = len(combined_diff) > MAX_PREVIEW_DIFF_CHARS
+        return json.dumps(
+            {
+                "changes": [
+                    {
+                        "path": change["relative"],
+                        "original_sha256": change["original_sha256"],
+                        "updated_sha256": change["updated_sha256"],
+                    }
+                    for change in prepared
+                ],
+                "change_set_sha256": _change_set_sha256(prepared),
+                "diff": combined_diff[:MAX_PREVIEW_DIFF_CHARS],
+                "diff_truncated": truncated,
+            }
+        )
+
+    def apply_text_change_set(arguments: Mapping[str, Any]) -> str:
+        raw_changes = arguments["changes"]
+        prepared = _prepare_change_set(raw_changes)
+        expected_set_sha256 = str(arguments["expected_change_set_sha256"]).casefold()
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_set_sha256):
+            raise ToolError("expected_change_set_sha256 must be a 64-character SHA-256 digest.")
+        if _change_set_sha256(prepared) != expected_set_sha256:
+            raise ToolError("Change set differs from the reviewed preview; request a new preview.")
+        for raw, change in zip(raw_changes, prepared, strict=True):
+            expected_file_sha256 = str(raw.get("expected_sha256", "")).casefold()
+            if expected_file_sha256 != change["original_sha256"]:
+                raise ToolError(
+                    f"File {change['relative']} differs from its reviewed preview digest."
+                )
+
+        temporaries: list[Path] = []
+        checkpoints = []
+        applied: list[dict[str, Any]] = []
+        try:
+            for change in prepared:
+                temporaries.append(_write_temporary_text(change["path"], change["updated"]))
+            if checkpoint_store is not None:
+                for change in prepared:
+                    checkpoints.append(
+                        checkpoint_store.create(
+                            change["relative"],
+                            change["original"],
+                            change["original_sha256"],
+                            change["updated_sha256"],
+                        )
+                    )
+            for change in prepared:
+                current = _read_modifiable_text(change["path"])
+                if hashlib.sha256(current.encode("utf-8")).hexdigest() != change["original_sha256"]:
+                    raise ToolError(
+                        f"File {change['relative']} changed while preparing the transaction."
+                    )
+            for temporary, change in zip(temporaries, prepared, strict=True):
+                os.replace(temporary, change["path"])
+                applied.append(change)
+        except ToolError:
+            raise
+        except OSError as exc:
+            recovery_failed = False
+            for change in reversed(applied):
+                try:
+                    _atomic_replace_text(change["path"], change["original"])
+                    if checkpoints:
+                        checkpoint_index = prepared.index(change)
+                        if not checkpoint_store or not checkpoint_store.mark_restored(
+                            checkpoints[checkpoint_index].id
+                        ):
+                            recovery_failed = True
+                except (OSError, CheckpointStoreError):
+                    recovery_failed = True
+            if recovery_failed:
+                raise ToolError(
+                    "Multi-file write failed and automatic recovery was incomplete; "
+                    "use edit checkpoints before further changes."
+                ) from exc
+            raise ToolError(
+                "Multi-file write failed; already-written files were restored."
+            ) from exc
+        finally:
+            for temporary in temporaries:
+                temporary.unlink(missing_ok=True)
+        return json.dumps(
+            {
+                "change_set_sha256": expected_set_sha256,
+                "paths": [change["relative"] for change in prepared],
+                "checkpoint_ids": [checkpoint.id for checkpoint in checkpoints],
+                "files_changed": len(prepared),
+            }
+        )
+
     def _read_modifiable_text(path: Path) -> str:
         if not path.is_file():
             raise ToolError("The requested replacement path is not an existing file.")
@@ -570,6 +675,47 @@ def build_phase3_registry(
         if updated == original:
             raise ToolError("Replacement would not change the file.")
         return updated
+
+    def _prepare_change_set(raw_changes: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_changes, list) or not 1 <= len(raw_changes) <= MAX_CHANGE_SET_FILES:
+            raise ToolError(f"changes must contain between 1 and {MAX_CHANGE_SET_FILES} items.")
+        prepared: list[dict[str, Any]] = []
+        seen_paths: set[str] = set()
+        for raw in raw_changes:
+            if not isinstance(raw, Mapping):
+                raise ToolError("Every change must be an object.")
+            path = boundary.write_target(str(raw["path"]))
+            relative = path.relative_to(boundary.root).as_posix()
+            if relative in seen_paths:
+                raise ToolError("Change-set paths cannot contain duplicates.")
+            seen_paths.add(relative)
+            original = _read_modifiable_text(path)
+            updated = _replace_unique_text(original, str(raw["old_text"]), str(raw["new_text"]))
+            if len(updated.encode("utf-8")) > MAX_WRITE_BYTES:
+                raise ToolError(f"Modified file {relative} exceeds the write limit.")
+            prepared.append(
+                {
+                    "path": path,
+                    "relative": relative,
+                    "original": original,
+                    "updated": updated,
+                    "original_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+                    "updated_sha256": hashlib.sha256(updated.encode("utf-8")).hexdigest(),
+                }
+            )
+        return prepared
+
+    def _change_set_sha256(prepared: list[dict[str, Any]]) -> str:
+        contract = [
+            {
+                "path": change["relative"],
+                "original_sha256": change["original_sha256"],
+                "updated_sha256": change["updated_sha256"],
+            }
+            for change in prepared
+        ]
+        encoded = json.dumps(contract, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
 
     def list_edit_checkpoints(arguments: Mapping[str, Any]) -> str:
         assert checkpoint_store is not None
@@ -670,6 +816,82 @@ def build_phase3_registry(
             },
             handler=preview_text_change,
             permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="preview_text_change_set",
+            description=(
+                "Preview one to five exact text replacements as one bounded combined diff and "
+                "review fingerprint without writing."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "changes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "old_text": {"type": "string", "minLength": 1},
+                                "new_text": {"type": "string"},
+                            },
+                            "required": ["path", "old_text", "new_text"],
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["changes"],
+                "additionalProperties": False,
+            },
+            handler=preview_text_change_set,
+            permission=PermissionLevel.LOW,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="apply_text_change_set",
+            description=(
+                "Apply one reviewed one-to-five-file exact change set after HIGH confirmation. "
+                "Prevalidates every digest and restores earlier files if a later write fails."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "changes": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 5,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string"},
+                                "old_text": {"type": "string", "minLength": 1},
+                                "new_text": {"type": "string"},
+                                "expected_sha256": {
+                                    "type": "string",
+                                    "minLength": 64,
+                                    "maxLength": 64,
+                                },
+                            },
+                            "required": ["path", "old_text", "new_text", "expected_sha256"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    "expected_change_set_sha256": {
+                        "type": "string",
+                        "minLength": 64,
+                        "maxLength": 64,
+                    },
+                },
+                "required": ["changes", "expected_change_set_sha256"],
+                "additionalProperties": False,
+            },
+            handler=apply_text_change_set,
+            permission=PermissionLevel.HIGH,
         )
     )
     if checkpoint_store is not None:
