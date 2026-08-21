@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -54,6 +55,23 @@ class MemoryCategory(StrEnum):
     DECISION = "decision"
 
 
+@dataclass(frozen=True, slots=True)
+class MemoryRecord:
+    """Lifecycle metadata for one durable memory."""
+
+    id: int
+    content: str
+    category: MemoryCategory
+    created_at: str
+    updated_at: str
+    last_retrieved_at: str | None
+    archived_at: str | None
+    expires_at: str | None
+
+    def as_item(self) -> MemoryItem:
+        return _memory_item(self.id, self.content, self.category)
+
+
 class SqliteLongTermMemory:
     """Store explicit facts locally and retrieve them without embeddings."""
 
@@ -70,16 +88,24 @@ class SqliteLongTermMemory:
         try:
             with self._connect() as connection:
                 existing = connection.execute(
-                    "SELECT id, category FROM memories WHERE content = ?", (cleaned,)
+                    "SELECT id, category, archived_at, expires_at FROM memories "
+                    "WHERE content = ?",
+                    (cleaned,),
                 ).fetchone()
                 if existing is not None:
+                    if existing[2] is not None or _is_expired(existing[3]):
+                        raise MemoryStoreError(
+                            f"That fact is stored as inactive memory {int(existing[0])}; "
+                            "restore it or clear its expiration instead."
+                        )
                     return _memory_item(int(existing[0]), cleaned, str(existing[1]))
                 count = connection.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
                 if count >= MAX_STORED_FACTS:
                     raise MemoryStoreError("Long-term memory has reached its storage limit.")
                 cursor = connection.execute(
-                    "INSERT INTO memories(content, category, created_at) VALUES (?, ?, ?)",
-                    (cleaned, normalized_category.value, datetime.now(UTC).isoformat()),
+                    "INSERT INTO memories(content, category, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (cleaned, normalized_category.value, _now(), _now()),
                 )
                 memory_id = int(cursor.lastrowid)
         except sqlite3.Error as exc:
@@ -118,8 +144,8 @@ class SqliteLongTermMemory:
                     else str(current[0])
                 )
                 connection.execute(
-                    "UPDATE memories SET content = ?, category = ? WHERE id = ?",
-                    (cleaned, selected_category, memory_id),
+                    "UPDATE memories SET content = ?, category = ?, updated_at = ? WHERE id = ?",
+                    (cleaned, selected_category, _now(), memory_id),
                 )
         except MemoryStoreError:
             raise
@@ -128,17 +154,68 @@ class SqliteLongTermMemory:
         return _memory_item(memory_id, cleaned, selected_category)
 
     def list_memories(self, limit: int = 50) -> tuple[MemoryItem, ...]:
-        """List recent durable facts in newest-first order."""
+        """List recent active durable facts in newest-first order."""
+        return tuple(record.as_item() for record in self.list_records(limit=limit))
+
+    def list_records(
+        self, limit: int = 50, *, include_inactive: bool = False
+    ) -> tuple[MemoryRecord, ...]:
+        """List bounded memory records with user-visible lifecycle metadata."""
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100.")
+        where = "" if include_inactive else _active_where()
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    "SELECT id, content, category FROM memories ORDER BY id DESC LIMIT ?", (limit,)
+                    "SELECT id, content, category, created_at, updated_at, "
+                    "last_retrieved_at, archived_at, expires_at FROM memories "
+                    f"{where} ORDER BY id DESC LIMIT ?",
+                    (*(() if include_inactive else (_now(),)), limit),
                 ).fetchall()
         except sqlite3.Error as exc:
             raise MemoryStoreError("Could not list long-term memories.") from exc
-        return tuple(_memory_item(int(row[0]), str(row[1]), str(row[2])) for row in rows)
+        return tuple(_record_from_row(row) for row in rows)
+
+    def archive(self, memory_id: int) -> bool:
+        """Exclude one memory from normal listing and retrieval without deleting it."""
+        return self._set_archived(memory_id, _now())
+
+    def restore(self, memory_id: int) -> bool:
+        """Restore one archived memory; any independent expiration remains in effect."""
+        return self._set_archived(memory_id, None)
+
+    def _set_archived(self, memory_id: int, archived_at: str | None) -> bool:
+        if memory_id < 1:
+            raise ValueError("memory_id must be positive.")
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE memories SET archived_at = ?, updated_at = ? WHERE id = ?",
+                    (archived_at, _now(), memory_id),
+                )
+        except sqlite3.Error as exc:
+            raise MemoryStoreError("Could not change long-term memory archive state.") from exc
+        return cursor.rowcount > 0
+
+    def set_expiration(self, memory_id: int, expires_at: datetime | None) -> bool:
+        """Set or clear an absolute UTC expiration for one memory."""
+        if memory_id < 1:
+            raise ValueError("memory_id must be positive.")
+        if expires_at is not None:
+            if expires_at.tzinfo is None:
+                raise ValueError("expires_at must include a timezone.")
+            normalized = expires_at.astimezone(UTC).isoformat()
+        else:
+            normalized = None
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE memories SET expires_at = ?, updated_at = ? WHERE id = ?",
+                    (normalized, _now(), memory_id),
+                )
+        except sqlite3.Error as exc:
+            raise MemoryStoreError("Could not change long-term memory expiration.") from exc
+        return cursor.rowcount > 0
 
     def forget(self, memory_id: int) -> bool:
         """Delete one explicitly selected fact by identifier."""
@@ -163,8 +240,9 @@ class SqliteLongTermMemory:
         try:
             with self._connect() as connection:
                 rows = connection.execute(
-                    "SELECT id, content, category FROM memories ORDER BY id DESC LIMIT ?",
-                    (MAX_SEARCH_CANDIDATES,),
+                    "SELECT id, content, category FROM memories "
+                    f"{_active_where()} ORDER BY id DESC LIMIT ?",
+                    (_now(), MAX_SEARCH_CANDIDATES),
                 ).fetchall()
         except sqlite3.Error as exc:
             raise MemoryStoreError("Could not search long-term memory.") from exc
@@ -182,7 +260,17 @@ class SqliteLongTermMemory:
                 score = len(overlap) / len(query_terms)
                 ranked.append((score, item.id, item))
         ranked.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
-        return tuple(entry[2] for entry in ranked[:limit])
+        results = tuple(entry[2] for entry in ranked[:limit])
+        if results:
+            try:
+                with self._connect() as connection:
+                    connection.executemany(
+                        "UPDATE memories SET last_retrieved_at = ? WHERE id = ?",
+                        [(_now(), item.id) for item in results],
+                    )
+            except sqlite3.Error as exc:
+                raise MemoryStoreError("Could not update memory retrieval metadata.") from exc
+        return results
 
     def _initialize(self) -> None:
         try:
@@ -193,7 +281,11 @@ class SqliteLongTermMemory:
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, "
                     "content TEXT NOT NULL UNIQUE, "
                     "category TEXT NOT NULL DEFAULT 'fact', "
-                    "created_at TEXT NOT NULL)"
+                    "created_at TEXT NOT NULL, "
+                    "updated_at TEXT NOT NULL, "
+                    "last_retrieved_at TEXT, "
+                    "archived_at TEXT, "
+                    "expires_at TEXT)"
                 )
                 columns = {
                     str(row[1]) for row in connection.execute("PRAGMA table_info(memories)")
@@ -202,6 +294,12 @@ class SqliteLongTermMemory:
                     connection.execute(
                         "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'fact'"
                     )
+                if "updated_at" not in columns:
+                    connection.execute("ALTER TABLE memories ADD COLUMN updated_at TEXT")
+                    connection.execute("UPDATE memories SET updated_at = created_at")
+                for name in ("last_retrieved_at", "archived_at", "expires_at"):
+                    if name not in columns:
+                        connection.execute(f"ALTER TABLE memories ADD COLUMN {name} TEXT")
         except (OSError, sqlite3.Error) as exc:
             raise MemoryStoreError("Could not initialize long-term memory.") from exc
 
@@ -234,3 +332,28 @@ def _memory_item(
 ) -> MemoryItem:
     normalized = _validate_category(category)
     return MemoryItem(memory_id, content, f"long-term memory:{normalized.value}")
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _active_where() -> str:
+    return "WHERE archived_at IS NULL AND (expires_at IS NULL OR expires_at > ?)"
+
+
+def _is_expired(value: object) -> bool:
+    return value is not None and str(value) <= _now()
+
+
+def _record_from_row(row: sqlite3.Row | tuple[object, ...]) -> MemoryRecord:
+    return MemoryRecord(
+        id=int(row[0]),
+        content=str(row[1]),
+        category=_validate_category(str(row[2])),
+        created_at=str(row[3]),
+        updated_at=str(row[4]),
+        last_retrieved_at=None if row[5] is None else str(row[5]),
+        archived_at=None if row[6] is None else str(row[6]),
+        expires_at=None if row[7] is None else str(row[7]),
+    )

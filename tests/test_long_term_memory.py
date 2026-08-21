@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -86,3 +87,56 @@ def test_long_term_memory_migrates_existing_database_to_fact_category(tmp_path) 
     store = SqliteLongTermMemory(path)
 
     assert store.list_memories()[0].source == "long-term memory:fact"
+
+
+def test_memory_archive_restore_and_expiration_control_retrieval(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    memory = store.remember("The launch codename is Starling.", MemoryCategory.PROJECT)
+
+    assert store.archive(memory.id) is True
+    assert store.search("launch codename") == ()
+    assert store.list_memories() == ()
+    archived = store.list_records(include_inactive=True)[0]
+    assert archived.archived_at is not None
+
+    assert store.restore(memory.id) is True
+    assert store.search("launch codename") == (memory,)
+    retrieved = store.list_records()[0]
+    assert retrieved.last_retrieved_at is not None
+
+    assert store.set_expiration(memory.id, datetime.now(UTC) - timedelta(seconds=1)) is True
+    assert store.search("launch codename") == ()
+    assert store.list_memories() == ()
+    with pytest.raises(MemoryStoreError, match="inactive memory"):
+        store.remember(memory.content, MemoryCategory.PROJECT)
+
+    assert store.set_expiration(memory.id, None) is True
+    assert store.search("launch codename") == (memory,)
+
+
+def test_memory_expiration_requires_timezone_and_valid_id(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+
+    with pytest.raises(ValueError, match="timezone"):
+        store.set_expiration(1, datetime.now())
+    assert store.set_expiration(999, datetime.now(UTC) + timedelta(days=1)) is False
+    assert store.archive(999) is False
+    assert store.restore(999) is False
+
+
+def test_lifecycle_migration_backfills_update_timestamp(tmp_path) -> None:
+    path = tmp_path / "legacy-lifecycle.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "content TEXT NOT NULL UNIQUE, category TEXT NOT NULL DEFAULT 'fact', "
+            "created_at TEXT NOT NULL)"
+        )
+        connection.execute("INSERT INTO memories VALUES (1, 'Legacy fact', 'fact', 'timestamp')")
+
+    record = SqliteLongTermMemory(path).list_records()[0]
+
+    assert record.updated_at == record.created_at == "timestamp"
+    assert record.last_retrieved_at is None
+    assert record.archived_at is None
+    assert record.expires_at is None
