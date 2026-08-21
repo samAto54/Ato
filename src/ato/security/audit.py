@@ -15,7 +15,7 @@ from ato.security.permissions import PermissionDecision, PermissionLevel
 
 MAX_AUDIT_TEXT = 2_000
 SENSITIVE_KEY_PARTS = ("api_key", "authorization", "password", "secret", "token")
-CONTENT_ARGUMENT_KEYS = {"content", "old_text", "new_text"}
+CONTENT_ARGUMENT_KEYS = {"content", "old_text", "new_text", "text"}
 MAX_CONFIRMATION_PREVIEW = 500
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9_-]{8,}"),
