@@ -44,6 +44,7 @@ The current Phase 9 build provides:
 - HIGH-confirmation, write-only Windows clipboard support with secret rejection
 - HIGH-confirmation launching of three fixed, argument-free Windows applications
 - Confirmed privacy-reduced process listings and exact-PID snapshot checks
+- Provider-neutral speech recognition and synthesis contracts with bounded payloads
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -87,6 +88,7 @@ ato/
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
 |   |-- ui/             # Terminal and future user interfaces
+|   |-- voice/          # Future speech providers and bounded audio contracts
 |   |-- config.py       # Environment configuration
 |   |-- exceptions.py   # Application-specific errors
 |   |-- main.py         # Stable application entry point
