@@ -153,6 +153,52 @@ def test_terminal_copy_last_requires_existing_reply(tmp_path) -> None:
     assert "Ato error: There is no assistant reply to copy yet." in output
 
 
+def test_terminal_exports_bounded_plain_text_history(tmp_path) -> None:
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+    )
+    history = [
+        Message(Role.USER, "first line\nsecond line"),
+        Message(Role.ASSISTANT, "answer"),
+    ]
+    inputs = iter(["/export-history exports/chat.txt", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM(), history=history),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    exported = (tmp_path / "exports" / "chat.txt").read_text(encoding="utf-8")
+    assert "USER:\n  first line\n  second line" in exported
+    assert "ASSISTANT:\n  answer" in exported
+    assert "Ato: Exported conversation history to exports/chat.txt." in output
+
+
+def test_terminal_history_export_never_overwrites(tmp_path) -> None:
+    target = tmp_path / "chat.txt"
+    target.write_text("keep", encoding="utf-8")
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+    )
+    inputs = iter(["/export-history chat.txt", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM(), history=[Message(Role.USER, "private")]),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert target.read_text(encoding="utf-8") == "keep"
+    assert any("will not overwrite" in line for line in output)
+
+
 def test_terminal_saves_successful_turns(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     inputs = iter(["Hello", "quit"])

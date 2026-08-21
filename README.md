@@ -14,6 +14,7 @@ The current build provides:
 - Local rejection of unknown slash commands with a `/help` hint and no model API request
 - A bounded local `/history` view of recent verbatim conversation messages
 - Explicit `/copy-last` transfer of the latest reply through guarded write-only clipboard support
+- HIGH-confirmation, non-overwriting plain-text export of bounded recent conversation history
 - Incremental streaming responses in the terminal
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -268,6 +269,11 @@ summary text are not expanded. This command is local and does not make a model r
 Use `/copy-last` to copy the newest assistant reply. It requests HIGH permission and uses the
 existing write-only clipboard boundary, including length, control-character, and likely-secret
 rejection. Ato cannot read or preserve the clipboard's previous contents.
+Use `/export-history <path.txt>` to write up to 50 recent messages to a new workspace-bound plain
+text file. Each message is capped at 1,000 characters, content lines are indented beneath fixed
+role labels, unsupported control characters are replaced, and older-message omissions are noted.
+The export requires HIGH confirmation, creates missing parent directories, and never overwrites an
+existing file. Plain text is used so conversation content cannot activate Markdown links or images.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.

@@ -31,6 +31,7 @@ EXIT_COMMANDS = {"exit", "quit"}
 HELP_COMMAND = "/help"
 STATUS_COMMAND = "/status"
 HISTORY_COMMAND = "/history"
+EXPORT_HISTORY_PREFIX = "/export-history "
 CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
@@ -52,6 +53,7 @@ HELP_TEXT = """Ato terminal commands:
   /help                              Show this command reference
   /status                            Show local subsystem availability
   /history                           Show recent conversation messages
+  /export-history <path.txt>         Export bounded history to a new text file
   /clear-memory                      Clear conversation history
   /remember [category:] <text>       Save a long-term memory
   /memories                          List active long-term memories
@@ -147,6 +149,34 @@ def run_terminal(
                 if len(content) > 200:
                     content = f"{content[:197]}..."
                 write(f"  {message.role.value}: {content}")
+            continue
+        if user_input.lower().startswith(EXPORT_HISTORY_PREFIX):
+            if tool_registry is None or not tool_registry.has_tool("create_text_file"):
+                write("Ato error: File creation is unavailable.")
+                continue
+            path = user_input[len(EXPORT_HISTORY_PREFIX) :].strip()
+            if not path.casefold().endswith(".txt"):
+                write("Ato error: Conversation exports must use a .txt file extension.")
+                continue
+            if not agent.conversation:
+                write("Ato error: There is no conversation history to export.")
+                continue
+            try:
+                result = json.loads(
+                    tool_registry.execute(
+                        "create_text_file",
+                        {"path": path, "content": _render_history_export(agent)},
+                        user_request=user_input,
+                    )
+                )
+                exported_path = str(result["path"])
+            except (AtoError, ValueError, KeyError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write(f"Ato: Exported conversation history to {exported_path}.")
+            continue
+        if user_input.lower() == EXPORT_HISTORY_PREFIX.strip():
+            write("Ato error: Use /export-history followed by a new .txt file path.")
             continue
         if user_input.lower() == SPEAK_LAST_COMMAND:
             if tool_registry is None or not tool_registry.has_tool("speak_text"):
@@ -529,6 +559,28 @@ def _latest_assistant_reply(agent: Agent) -> str | None:
         ),
         None,
     )
+
+
+def _render_history_export(agent: Agent) -> str:
+    messages = agent.conversation
+    visible = messages[-50:]
+    omitted = len(messages) - len(visible)
+    lines = ["Ato conversation export", ""]
+    if omitted:
+        lines.extend([f"[{omitted} older messages omitted]", ""])
+    for message in visible:
+        content = "".join(
+            character
+            if character in {"\n", "\t"} or ord(character) >= 32 and ord(character) != 127
+            else "�"
+            for character in message.content[:1_000]
+        )
+        lines.append(f"{message.role.value.upper()}:")
+        lines.extend(f"  {line}" for line in content.splitlines() or [""])
+        if len(message.content) > 1_000:
+            lines.append("  [message truncated]")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _deliver_agent_turn(
