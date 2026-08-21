@@ -36,7 +36,7 @@ from ato.tools.research import WebResearchCoordinator
 from ato.tools.search import WebSearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
-from ato.voice import WindowsSpeechPlayer, validate_synthesis_text
+from ato.voice import MicrophoneRecorder, WindowsSpeechPlayer, validate_synthesis_text
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 MAX_LIST_RESULTS = 200
@@ -121,6 +121,7 @@ def build_phase3_registry(
     application_launcher: ApplicationLauncher | None = None,
     process_monitor: ProcessMonitor | None = None,
     speech_player: WindowsSpeechPlayer | None = None,
+    microphone_recorder: MicrophoneRecorder | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -560,6 +561,20 @@ def build_phase3_registry(
         text = validate_synthesis_text(str(arguments["text"]))
         speech_player.speak(text)
         return json.dumps({"spoken": True, "characters": len(text), "provider": "windows"})
+
+    def record_microphone(arguments: Mapping[str, Any]) -> str:
+        assert microphone_recorder is not None
+        duration = int(arguments["duration_seconds"])
+        path = microphone_recorder.record(duration).resolve()
+        if not boundary.contains(path) or path.suffix.casefold() != ".wav":
+            raise ToolError("Microphone provider returned an unsafe recording path.")
+        return json.dumps(
+            {
+                "recorded": True,
+                "duration_seconds": duration,
+                "path": path.relative_to(boundary.root).as_posix(),
+            }
+        )
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
         assert github_client is not None
@@ -1403,6 +1418,26 @@ def build_phase3_registry(
                 },
                 handler=speak_text,
                 permission=PermissionLevel.HIGH,
+            )
+        )
+    if microphone_recorder is not None:
+        registry.register(
+            ToolSpec(
+                name="record_microphone",
+                description=(
+                    "Record one explicit 1-120 second mono WAV clip after CRITICAL confirmation. "
+                    "Does not listen in the background or transcribe automatically."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "duration_seconds": {"type": "integer", "minimum": 1, "maximum": 120}
+                    },
+                    "required": ["duration_seconds"],
+                    "additionalProperties": False,
+                },
+                handler=record_microphone,
+                permission=PermissionLevel.CRITICAL,
             )
         )
     registry.register(
