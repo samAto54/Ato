@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 9 build provides:
+The current build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -48,6 +48,8 @@ The current Phase 9 build provides:
 - Optional confirmed offline Windows text-to-speech playback
 - Optional CRITICAL-confirmation one-shot microphone recording without background listening
 - Optional local-model offline WAV transcription with no automatic downloads or uploads
+- Reviewed `/voice <seconds>` turns that require explicit recording and transcription
+  permissions, show the transcript, and submit it only after user approval
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -70,8 +72,8 @@ The current Phase 9 build provides:
 - Automated tests that do not make real API requests
 
 Permanent/recursive deletion, arbitrary command execution, browser automation, autonomous
-workflows, voice, GUI, and
-cybersecurity capabilities are intentionally reserved for later phases.
+workflows, background voice listening, GUI, and cybersecurity capabilities are intentionally
+reserved for later phases.
 
 The repository also retains the earlier experimental prototype under
 `legacy/phase0`. It is intentionally isolated from the active package so useful
@@ -91,7 +93,7 @@ ato/
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
 |   |-- ui/             # Terminal and future user interfaces
-|   |-- voice/          # Future speech providers and bounded audio contracts
+|   |-- voice/          # Bounded recording, transcription, and speech providers
 |   |-- config.py       # Environment configuration
 |   |-- exceptions.py   # Application-specific errors
 |   |-- main.py         # Stable application entry point
@@ -251,6 +253,13 @@ You can also run the installed `ato` command. Enter `exit` or `quit` to close.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
+
+When microphone recording and local transcription are configured, enter `/voice 5` to record a
+five-second voice turn. Ato separately confirms the CRITICAL recording and HIGH transcription
+operations, displays the resulting transcript, and asks whether to submit it. A cancelled
+transcript never reaches the agent. An approved transcript is passed directly as conversation
+text—even if it resembles a slash command—so speech cannot trigger terminal commands. Voice input
+is always user-initiated; Ato does not listen in the background and has no wake-word support.
 
 ## Verify the project
 
