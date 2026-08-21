@@ -73,6 +73,7 @@ The current build provides:
 - A provider-neutral `LLMClient` interface
 - Built-in Standard and original Ato HUD desktop theme palettes with an allowlisted toggle
 - A native chat-only desktop shell with persisted conversation and background model requests
+- An original full-screen Ato HUD centered on an animated, backend-driven AI visual core
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -301,6 +302,29 @@ The desktop sidebar is functional: Chat restores the 20 most recent messages, wh
 Knowledge show bounded read-only local snapshots. Research and Activity display explicit locked
 states until GUI tool confirmations are available. Mutating memory, knowledge, research, and tool
 operations remain confined to the permission-controlled terminal interface for now.
+
+### Cinematic Ato HUD
+
+The default desktop theme is the original Ato HUD. Its central orb is rendered locally from Canvas
+vector primitives—no Marvel artwork, copied JARVIS assets, external images, or remote animation
+libraries are used. Layered elliptical rings rotate in opposite directions, the core pulses, local
+particles orbit the center, and state-specific waveform and scan effects change its behavior.
+
+The thread-safe visual model defines these real backend states:
+
+- `IDLE`: low-energy pulse and slow ring movement.
+- `LISTENING`: expanded pulse and circular waveform, reserved for approved microphone capture.
+- `PROCESSING`: faster rings and scanning effect; connected to actual desktop model requests.
+- `TOOL_EXECUTION`: active scan and a required bounded tool label, reserved for approved GUI tools.
+- `SPEAKING`: high-energy waveform, reserved for approved speech playback.
+
+Today the desktop automatically transitions `IDLE -> PROCESSING -> IDLE` around real chat work.
+Listening, tool execution, and speaking visuals exist in the shared state model but remain unable to
+activate from GUI controls until the permission bridge connects their actual backends. The right HUD
+shows the active task, locked tool channel, and privacy-reduced local OS/CPU/RAM data; network status
+is explicitly `NOT PROBED`. The bottom microphone control also remains visibly locked. Press `F11`
+to toggle full screen and `Esc` to leave it. Switching to Standard hides the cinematic orb and right
+HUD while retaining the same Agent Core, conversation, and safety behavior.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
