@@ -47,6 +47,7 @@ The current Phase 9 build provides:
 - Provider-neutral speech recognition and synthesis contracts with bounded payloads
 - Optional confirmed offline Windows text-to-speech playback
 - Optional CRITICAL-confirmation one-shot microphone recording without background listening
+- Optional local-model offline WAV transcription with no automatic downloads or uploads
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -134,6 +135,8 @@ python -m pip install -e ".[dev]"
 ```
 
 Optional microphone support requires `python -m pip install -e ".[voice]"`.
+Offline transcription requires `python -m pip install -e ".[stt]"` plus an existing local
+faster-whisper model directory configured through `ATO_STT_MODEL_PATH`.
 
 Copy the safe environment template:
 

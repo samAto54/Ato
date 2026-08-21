@@ -34,6 +34,7 @@ class Settings:
     github_repository: str | None = None
     github_token: str | None = None
     voice_enabled: bool = False
+    stt_model_path: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -74,6 +75,8 @@ class Settings:
         if raw_voice_enabled not in {"true", "false"}:
             raise ConfigurationError("ATO_VOICE_ENABLED must be true or false.")
         voice_enabled = raw_voice_enabled == "true"
+        raw_stt_model_path = os.getenv("ATO_STT_MODEL_PATH", "").strip()
+        stt_model_path = Path(raw_stt_model_path) if raw_stt_model_path else None
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -128,4 +131,5 @@ class Settings:
             github_repository=github_repository,
             github_token=github_token,
             voice_enabled=voice_enabled,
+            stt_model_path=stt_model_path,
         )
