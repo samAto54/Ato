@@ -16,6 +16,7 @@ The current Phase 7 build provides:
 - Persisted summaries with recent messages retained verbatim
 - Explicit SQLite long-term facts with bounded relevance retrieval
 - Confirmed correction and deletion of individual long-term memories by ID
+- Categorized long-term memory for facts, preferences, projects, and decisions
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
@@ -224,6 +225,9 @@ Existing version-1 memory files migrate automatically when next saved.
 Long-term memory is separate from conversation history. Use `/remember <fact>` to
 save a user-approved fact, `/memories` to list saved facts, `/edit-memory <id> <fact>`
 to correct one after confirmation, and `/forget <id>` to delete one after confirmation.
+Prefix new or edited content with `preference:`, `project:`, `decision:`, or `fact:` to
+categorize it; content without a recognized prefix remains a fact. Existing memory databases
+migrate automatically and classify older entries as facts.
 Edits preserve the memory ID while replacing its searchable content; duplicate facts and
 the same sensitive-content patterns rejected during creation are also rejected during edits.
 Relevant facts are retrieved with bounded local

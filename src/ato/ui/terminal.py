@@ -12,7 +12,7 @@ from ato.brain.memory import CompositeMemoryRetriever
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
-from ato.memory import JsonMemoryStore, SqliteLongTermMemory
+from ato.memory import JsonMemoryStore, MemoryCategory, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
@@ -80,7 +80,10 @@ def run_terminal(
                 write("Ato error: Long-term memory is unavailable.")
                 continue
             try:
-                item = long_term_memory.remember(user_input[len(REMEMBER_PREFIX) :])
+                content, category = _parse_memory_content(user_input[len(REMEMBER_PREFIX) :])
+                item = long_term_memory.remember(
+                    content, category if category is not None else MemoryCategory.FACT
+                )
             except AtoError as exc:
                 write(f"Ato error: {exc}")
             else:
@@ -101,7 +104,8 @@ def run_terminal(
                 if memories:
                     write("Ato long-term memories:")
                     for item in memories:
-                        write(f"  {item.id}: {item.content}")
+                        category = item.source.partition(":")[2] or MemoryCategory.FACT.value
+                        write(f"  {item.id} [{category}]: {item.content}")
                 else:
                     write("Ato: No long-term memories saved.")
             continue
@@ -134,21 +138,22 @@ def run_terminal(
                 write("Ato error: Long-term memory is unavailable.")
                 continue
             raw_edit = user_input[len(EDIT_MEMORY_PREFIX) :].strip()
-            raw_id, separator, content = raw_edit.partition(" ")
+            raw_id, separator, raw_content = raw_edit.partition(" ")
             try:
                 memory_id = int(raw_id)
             except ValueError:
                 write("Ato error: Use /edit-memory <id> <replacement fact>.")
                 continue
-            if not separator or not content.strip():
+            if not separator or not raw_content.strip():
                 write("Ato error: Use /edit-memory <id> <replacement fact>.")
                 continue
+            content, category = _parse_memory_content(raw_content)
             confirmation = read(f"Replace long-term memory {memory_id}? [y/N]: ").strip().lower()
             if confirmation not in {"y", "yes"}:
                 write("Ato: Memory edit cancelled.")
                 continue
             try:
-                updated = long_term_memory.update(memory_id, content)
+                updated = long_term_memory.update(memory_id, content, category)
             except (AtoError, ValueError) as exc:
                 write(f"Ato error: {exc}")
             else:
@@ -255,6 +260,17 @@ def _write_terminal_chunk(text: str) -> None:
     """Write one response fragment without inserting extra line breaks."""
     sys.stdout.write(text)
     sys.stdout.flush()
+
+
+def _parse_memory_content(value: str) -> tuple[str, MemoryCategory | None]:
+    """Extract an optional recognized ``category:`` prefix from memory text."""
+    prefix, separator, content = value.strip().partition(":")
+    if separator:
+        try:
+            return content.strip(), MemoryCategory(prefix.strip().casefold())
+        except ValueError:
+            pass
+    return value.strip(), None
 
 
 def main() -> None:
