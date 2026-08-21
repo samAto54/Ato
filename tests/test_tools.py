@@ -212,17 +212,86 @@ def test_controlled_replace_requires_one_exact_match(tmp_path: Path) -> None:
     path.write_text("old\nkeep\n", encoding="utf-8")
     registry = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
 
-    registry.execute(
-        "replace_text_in_file",
-        {"path": "module.py", "old_text": "old", "new_text": "new"},
+    preview = json.loads(
+        registry.execute(
+            "preview_text_change",
+            {"path": "module.py", "old_text": "old", "new_text": "new"},
+        )
     )
+    result = json.loads(
+        registry.execute(
+        "replace_text_in_file",
+            {
+                "path": "module.py",
+                "old_text": "old",
+                "new_text": "new",
+                "expected_sha256": preview["original_sha256"],
+            },
+        )
+    )
+    assert preview["diff"].startswith("--- a/module.py\n+++ b/module.py")
+    assert result["original_sha256"] == preview["original_sha256"]
+    assert result["updated_sha256"] == preview["updated_sha256"]
     assert path.read_text(encoding="utf-8") == "new\nkeep\n"
 
     with pytest.raises(ToolError, match="found 0"):
         registry.execute(
-            "replace_text_in_file",
+            "preview_text_change",
             {"path": "module.py", "old_text": "missing", "new_text": "x"},
         )
+
+
+def test_previewed_replace_rejects_stale_file_and_requires_high_permission(tmp_path: Path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\n", encoding="utf-8")
+    denied = build_phase3_registry(tmp_path)
+    preview = json.loads(
+        denied.execute(
+            "preview_text_change", {"path": "module.py", "old_text": "old", "new_text": "new"}
+        )
+    )
+
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied.execute(
+            "replace_text_in_file",
+            {
+                "path": "module.py",
+                "old_text": "old",
+                "new_text": "new",
+                "expected_sha256": preview["original_sha256"],
+            },
+        )
+    path.write_text("changed elsewhere\nold\n", encoding="utf-8")
+    allowed = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+    with pytest.raises(ToolError, match="changed after preview"):
+        allowed.execute(
+            "replace_text_in_file",
+            {
+                "path": "module.py",
+                "old_text": "old",
+                "new_text": "new",
+                "expected_sha256": preview["original_sha256"],
+            },
+        )
+    assert path.read_text(encoding="utf-8") == "changed elsewhere\nold\n"
+
+
+def test_text_change_preview_is_bounded_and_never_writes(tmp_path: Path) -> None:
+    path = tmp_path / "large.txt"
+    original = "a" * 20_000
+    path.write_text(original, encoding="utf-8")
+    registry = build_phase3_registry(tmp_path)
+
+    preview = json.loads(
+        registry.execute(
+            "preview_text_change",
+            {"path": "large.txt", "old_text": original, "new_text": "b" * 20_000},
+        )
+    )
+
+    assert preview["diff_truncated"] is True
+    assert len(preview["diff"]) == 10_000
+    assert path.read_text(encoding="utf-8") == original
 
 
 @pytest.mark.parametrize("path", [".env", "data/memory.json", ".github/workflow.yml", "key.pem"])
@@ -231,6 +300,11 @@ def test_controlled_writes_reject_protected_targets(tmp_path: Path, path: str) -
 
     with pytest.raises(ToolError, match="cannot|protected|Credential"):
         registry.execute("create_text_file", {"path": path, "content": "unsafe"})
+    with pytest.raises(ToolError, match="cannot|protected|Credential"):
+        registry.execute(
+            "preview_text_change",
+            {"path": path, "old_text": "unsafe", "new_text": "safe"},
+        )
 
 
 def test_trash_text_file_is_critical_confirmed_and_recoverable(tmp_path: Path) -> None:
