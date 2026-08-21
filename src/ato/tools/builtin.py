@@ -22,7 +22,7 @@ from ato.exceptions import CheckpointStoreError, ToolError
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
-from ato.tools.github import MAX_GITHUB_ITEMS, GitHubReadClient
+from ato.tools.github import MAX_GITHUB_ITEMS, GitHubClient
 from ato.tools.python_exec import validate_numeric_python
 from ato.tools.registry import ToolRegistry, ToolSpec
 from ato.tools.research import WebResearchCoordinator
@@ -107,7 +107,7 @@ def build_phase3_registry(
     web_searcher: WebSearchClient | None = None,
     research_store: SqliteResearchStore | None = None,
     checkpoint_store: SqliteEditCheckpointStore | None = None,
-    github_client: GitHubReadClient | None = None,
+    github_client: GitHubClient | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -484,6 +484,28 @@ def build_phase3_registry(
                 "untrusted_external": True,
                 "result": result,
             }
+        )
+
+    def preview_github_issue(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.preview_issue(
+                str(arguments["title"]),
+                str(arguments.get("body", "")),
+                [str(label) for label in arguments.get("labels", [])],
+            )
+        )
+
+    def create_github_issue(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.create_issue(
+                str(arguments["title"]),
+                str(arguments.get("body", "")),
+                [str(label) for label in arguments.get("labels", [])],
+                str(arguments["expected_repository"]),
+                str(arguments["expected_sha256"]),
+            )
         )
 
     def verify_code_change(arguments: Mapping[str, Any]) -> str:
@@ -976,6 +998,67 @@ def build_phase3_registry(
                 },
                 handler=github_read,
                 permission=PermissionLevel.MEDIUM,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="preview_github_issue",
+                description=(
+                    "Preview a bounded issue for the configured GitHub repository and return "
+                    "the SHA-256 fingerprint required for confirmed creation. Does not use "
+                    "the network or change GitHub."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "body": {"type": "string", "maxLength": 10_000},
+                        "labels": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 50},
+                            "maxItems": 10,
+                        },
+                    },
+                    "required": ["title"],
+                    "additionalProperties": False,
+                },
+                handler=preview_github_issue,
+                permission=PermissionLevel.LOW,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="create_github_issue",
+                description=(
+                    "Create exactly one previously previewed issue in the configured GitHub "
+                    "repository after HIGH confirmation. Requires a configured token."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                        "body": {"type": "string", "maxLength": 10_000},
+                        "labels": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1, "maxLength": 50},
+                            "maxItems": 10,
+                        },
+                        "expected_repository": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 200,
+                        },
+                        "expected_sha256": {
+                            "type": "string",
+                            "minLength": 64,
+                            "maxLength": 64,
+                        },
+                    },
+                    "required": ["title", "expected_repository", "expected_sha256"],
+                    "additionalProperties": False,
+                },
+                handler=create_github_issue,
+                permission=PermissionLevel.HIGH,
             )
         )
     registry.register(

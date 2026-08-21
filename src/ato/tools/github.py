@@ -1,8 +1,9 @@
-"""Bounded read-only access to one configured GitHub repository."""
+"""Bounded access to one configured GitHub repository."""
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import urllib.error
@@ -21,8 +22,13 @@ GITHUB_TIMEOUT_SECONDS = 15
 RepositoryRequester = Callable[[urllib.request.Request, int], bytes]
 
 
-class GitHubReadClient:
-    """Read a fixed repository through a small allowlisted API surface."""
+MAX_GITHUB_ISSUE_TITLE_CHARS = 200
+MAX_GITHUB_ISSUE_BODY_CHARS = 10_000
+MAX_GITHUB_ISSUE_LABELS = 10
+
+
+class GitHubClient:
+    """Access a fixed repository through a small allowlisted API surface."""
 
     def __init__(
         self,
@@ -35,6 +41,11 @@ class GitHubReadClient:
         self.repository = repository
         self._token = token
         self._requester = requester or _request_bytes
+        self._submitted_issue_fingerprints: set[str] = set()
+
+    @property
+    def can_write(self) -> bool:
+        return bool(self._token)
 
     def repository_metadata(self) -> dict[str, Any]:
         payload = self._get(f"/repos/{self.repository}")
@@ -102,7 +113,66 @@ class GitHubReadClient:
             "truncated": False,
         }
 
+    def preview_issue(self, title: str, body: str, labels: list[str]) -> dict[str, Any]:
+        normalized_title, normalized_body, normalized_labels = _validate_issue(title, body, labels)
+        fingerprint = _issue_fingerprint(
+            self.repository, normalized_title, normalized_body, normalized_labels
+        )
+        return {
+            "repository": self.repository,
+            "title": normalized_title,
+            "body": normalized_body,
+            "labels": normalized_labels,
+            "issue_sha256": fingerprint,
+        }
+
+    def create_issue(
+        self,
+        title: str,
+        body: str,
+        labels: list[str],
+        expected_repository: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
+        if not self._token:
+            raise ToolError("GitHub issue creation requires GITHUB_TOKEN.")
+        preview = self.preview_issue(title, body, labels)
+        if expected_repository != self.repository:
+            raise ToolError("Configured GitHub repository differs from the reviewed repository.")
+        if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+            raise ToolError("expected_sha256 must be a 64-character SHA-256 digest.")
+        fingerprint = preview["issue_sha256"]
+        if expected_sha256.casefold() != fingerprint:
+            raise ToolError("GitHub issue content differs from the reviewed preview.")
+        if fingerprint in self._submitted_issue_fingerprints:
+            raise ToolError("This exact GitHub issue was already submitted during this session.")
+        payload = self._request(
+            f"/repos/{self.repository}/issues",
+            method="POST",
+            body={"title": preview["title"], "body": preview["body"], "labels": preview["labels"]},
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("number"), int):
+            raise ToolError("GitHub returned an unexpected issue-creation response.")
+        self._submitted_issue_fingerprints.add(fingerprint)
+        return {
+            "number": payload["number"],
+            "title": payload.get("title"),
+            "state": payload.get("state"),
+            "html_url": payload.get("html_url"),
+            "repository": self.repository,
+            "issue_sha256": fingerprint,
+        }
+
     def _get(self, path: str, query: dict[str, str] | None = None) -> Any:
+        return self._request(path, query=query)
+
+    def _request(
+        self,
+        path: str,
+        query: dict[str, str] | None = None,
+        method: str = "GET",
+        body: dict[str, Any] | None = None,
+    ) -> Any:
         url = f"{GITHUB_API_ROOT}{path}"
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
@@ -113,7 +183,11 @@ class GitHubReadClient:
         }
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        request = urllib.request.Request(url, headers=headers, method="GET")
+        data = None
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(url, headers=headers, data=data, method=method)
         try:
             raw = self._requester(request, GITHUB_TIMEOUT_SECONDS)
             payload = json.loads(raw)
@@ -122,6 +196,34 @@ class GitHubReadClient:
         except (OSError, ValueError) as exc:
             raise ToolError("GitHub returned an unreadable response.") from exc
         return payload
+
+
+def _validate_issue(title: str, body: str, labels: list[str]) -> tuple[str, str, list[str]]:
+    normalized_title = title.strip()
+    if not normalized_title or len(normalized_title) > MAX_GITHUB_ISSUE_TITLE_CHARS:
+        raise ToolError("GitHub issue title must be 1-200 non-whitespace characters.")
+    if len(body) > MAX_GITHUB_ISSUE_BODY_CHARS:
+        raise ToolError("GitHub issue body exceeds the 10,000-character limit.")
+    if len(labels) > MAX_GITHUB_ISSUE_LABELS:
+        raise ToolError("GitHub issue accepts at most 10 labels.")
+    normalized_labels: list[str] = []
+    for label in labels:
+        normalized = label.strip()
+        if not normalized or len(normalized) > 50:
+            raise ToolError("GitHub issue labels must be 1-50 non-whitespace characters.")
+        if normalized.casefold() in {existing.casefold() for existing in normalized_labels}:
+            raise ToolError("GitHub issue labels cannot contain duplicates.")
+        normalized_labels.append(normalized)
+    return normalized_title, body, normalized_labels
+
+
+def _issue_fingerprint(repository: str, title: str, body: str, labels: list[str]) -> str:
+    contract = json.dumps(
+        {"repository": repository, "title": title, "body": body, "labels": labels},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(contract).hexdigest()
 
 
 def _request_bytes(request: urllib.request.Request, timeout: int) -> bytes:

@@ -37,6 +37,7 @@ The current Phase 9 build provides:
 - HIGH-confirmation execution of four fixed, no-shell development command profiles
 - CRITICAL-confirmation numeric-only Python execution with conservative syntax validation
 - Confirmed read-only GitHub access for one configured repository
+- Preview-guarded, HIGH-confirmation GitHub issue creation
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -157,8 +158,18 @@ UTF-8 file after `MEDIUM` confirmation. `GITHUB_TOKEN` is optional for public re
 be needed for private repositories or higher API limits. It is read only from the environment and
 is never returned in tool results. Requests use the fixed `https://api.github.com` host, a
 15-second timeout, a 1 MB response limit, list limits of 20, and a 100 KB file limit. This phase
-cannot create issues, comment, edit files, merge pull requests, or push commits. All GitHub content
-is labelled untrusted external data.
+The read-only tool cannot mutate GitHub. All GitHub content is labelled untrusted external data.
+
+When both `ATO_GITHUB_REPOSITORY` and `GITHUB_TOKEN` are configured, Ato can also create one
+bounded issue through a guarded two-step flow. `preview_github_issue` is local and read-only; it
+normalizes the title and returns the exact repository, body, labels, and a SHA-256 fingerprint.
+`create_github_issue` requires `HIGH` confirmation and accepts only content matching that preview,
+including the configured repository. Titles are capped at 200 characters, bodies at 10,000, and
+labels at ten unique 50-character values. After a known successful response, the same fingerprint
+cannot be submitted again during that Ato process. This in-memory duplicate guard cannot determine
+whether GitHub created an issue after an ambiguous connection failure, so Ato must not retry such
+a request without renewed user review. Issue comments, edits, closure, pull-request mutation,
+repository-file writes, merges, and pushes remain unavailable.
 
 ## Run Ato
 
