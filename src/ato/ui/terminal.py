@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
-from ato.brain.messages import Role
 from ato.coding import SqliteEditCheckpointStore
 from ato.computer import WindowsApplicationLauncher, WindowsClipboardWriter, WindowsProcessMonitor
 from ato.config import Settings
@@ -25,6 +24,12 @@ from ato.tools import build_phase3_registry
 from ato.tools.github import GitHubClient
 from ato.tools.registry import ToolRegistry
 from ato.tools.search import BraveSearchClient, TavilySearchClient
+from ato.ui.presentation import (
+    format_local_status,
+    latest_assistant_reply,
+    recent_history_lines,
+    render_history_export,
+)
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
 EXIT_COMMANDS = {"exit", "quit"}
@@ -124,14 +129,14 @@ def run_terminal(
                 tool_registry is not None and tool_registry.has_tool("speak_text")
             )
             write(
-                "Ato local status:\n"
-                "  conversation: ready\n"
-                f"  persistent conversation: {_status(memory_store is not None)}\n"
-                f"  long-term memory: {_status(long_term_memory is not None)}\n"
-                f"  knowledge: {_status(knowledge_store is not None)}\n"
-                f"  tools: {_status(tool_registry is not None)}\n"
-                f"  voice input: {_status(voice_input_ready)}\n"
-                f"  voice output: {_status(voice_output_ready)}"
+                format_local_status(
+                    persistent_conversation=memory_store is not None,
+                    long_term_memory=long_term_memory is not None,
+                    knowledge=knowledge_store is not None,
+                    tools=tool_registry is not None,
+                    voice_input=voice_input_ready,
+                    voice_output=voice_output_ready,
+                )
             )
             continue
         if user_input.lower() == HISTORY_COMMAND:
@@ -139,16 +144,8 @@ def run_terminal(
             if not messages:
                 write("Ato: No conversation messages yet.")
                 continue
-            visible = messages[-20:]
-            omitted = len(messages) - len(visible)
-            write("Ato recent conversation:")
-            if omitted:
-                write(f"  ... {omitted} older messages omitted")
-            for message in visible:
-                content = " ".join(message.content.split())
-                if len(content) > 200:
-                    content = f"{content[:197]}..."
-                write(f"  {message.role.value}: {content}")
+            for line in recent_history_lines(messages):
+                write(line)
             continue
         if user_input.lower().startswith(EXPORT_HISTORY_PREFIX):
             if tool_registry is None or not tool_registry.has_tool("create_text_file"):
@@ -165,7 +162,7 @@ def run_terminal(
                 result = json.loads(
                     tool_registry.execute(
                         "create_text_file",
-                        {"path": path, "content": _render_history_export(agent)},
+                        {"path": path, "content": render_history_export(agent.conversation)},
                         user_request=user_input,
                     )
                 )
@@ -182,7 +179,7 @@ def run_terminal(
             if tool_registry is None or not tool_registry.has_tool("speak_text"):
                 write("Ato error: Voice tools are unavailable.")
                 continue
-            last_reply = _latest_assistant_reply(agent)
+            last_reply = latest_assistant_reply(agent.conversation)
             if last_reply is None:
                 write("Ato error: There is no assistant reply to speak yet.")
                 continue
@@ -201,7 +198,7 @@ def run_terminal(
             if tool_registry is None or not tool_registry.has_tool("write_clipboard"):
                 write("Ato error: Clipboard writing is unavailable.")
                 continue
-            last_reply = _latest_assistant_reply(agent)
+            last_reply = latest_assistant_reply(agent.conversation)
             if last_reply is None:
                 write("Ato error: There is no assistant reply to copy yet.")
                 continue
@@ -544,43 +541,6 @@ def _write_terminal_chunk(text: str) -> None:
     """Write one response fragment without inserting extra line breaks."""
     sys.stdout.write(text)
     sys.stdout.flush()
-
-
-def _status(available: bool) -> str:
-    return "ready" if available else "not configured"
-
-
-def _latest_assistant_reply(agent: Agent) -> str | None:
-    return next(
-        (
-            message.content
-            for message in reversed(agent.conversation)
-            if message.role is Role.ASSISTANT
-        ),
-        None,
-    )
-
-
-def _render_history_export(agent: Agent) -> str:
-    messages = agent.conversation
-    visible = messages[-50:]
-    omitted = len(messages) - len(visible)
-    lines = ["Ato conversation export", ""]
-    if omitted:
-        lines.extend([f"[{omitted} older messages omitted]", ""])
-    for message in visible:
-        content = "".join(
-            character
-            if character in {"\n", "\t"} or ord(character) >= 32 and ord(character) != 127
-            else "�"
-            for character in message.content[:1_000]
-        )
-        lines.append(f"{message.role.value.upper()}:")
-        lines.extend(f"  {line}" for line in content.splitlines() or [""])
-        if len(message.content) > 1_000:
-            lines.append("  [message truncated]")
-        lines.append("")
-    return "\n".join(lines)
 
 
 def _deliver_agent_turn(
