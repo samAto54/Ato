@@ -43,6 +43,7 @@ The current Phase 9 build provides:
 - Provider-neutral notifications with confirmed, clearly labelled terminal delivery
 - HIGH-confirmation, write-only Windows clipboard support with secret rejection
 - HIGH-confirmation launching of three fixed, argument-free Windows applications
+- Confirmed privacy-reduced process listings and exact-PID snapshot checks
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -221,6 +222,15 @@ or command argument. Processes start with `shell=False`, detached standard strea
 interpolation. A returned process ID only confirms that Windows accepted process creation; it does
 not prove the application stayed open or became responsive. Ato cannot launch other applications,
 type or click inside an application, monitor its state, or terminate it in this phase.
+
+`inspect_processes` requires `MEDIUM` confirmation and returns a bounded snapshot of at most 500
+Windows processes, with user-facing results capped at 100. It can list processes with an optional
+literal name filter or look for one exact non-negative PID. Results contain only PID, process name,
+accumulated CPU seconds when available, and working-set bytes. The fixed PowerShell query and
+returned data exclude usernames, executable paths, command-line arguments, environment variables,
+window titles, open files, and network connections. A snapshot can become stale immediately and
+does not prove ownership, purpose, responsiveness, or continued execution. Process termination,
+suspension, priority changes, and other mutations remain unavailable.
 
 ## Run Ato
 
