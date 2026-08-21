@@ -39,6 +39,14 @@ class Transcriber:
         return self.transcript
 
 
+class Player:
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def speak(self, text: str) -> None:
+        self.texts.append(text)
+
+
 def _registry(tmp_path: Path, transcript: str):
     return build_phase3_registry(
         tmp_path,
@@ -106,3 +114,45 @@ def test_voice_command_reports_unavailable_tools() -> None:
     )
 
     assert "Ato error: Voice tools are unavailable." in output
+
+
+def test_speak_last_reads_latest_assistant_reply(tmp_path) -> None:
+    player = Player()
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+        speech_player=player,
+    )
+    inputs = iter(["first", "second", "/speak-last", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(RecordingLLM()),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert player.texts == ["heard: second"]
+    assert "Ato: Finished speaking the latest reply." in output
+
+
+def test_speak_last_requires_an_existing_assistant_reply(tmp_path) -> None:
+    player = Player()
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+        speech_player=player,
+    )
+    inputs = iter(["/speak-last", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(RecordingLLM()),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert player.texts == []
+    assert "Ato error: There is no assistant reply to speak yet." in output

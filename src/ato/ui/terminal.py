@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
+from ato.brain.messages import Role
 from ato.coding import SqliteEditCheckpointStore
 from ato.computer import WindowsApplicationLauncher, WindowsClipboardWriter, WindowsProcessMonitor
 from ato.config import Settings
@@ -41,6 +42,7 @@ INGEST_PREFIX = "/ingest "
 LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
 VOICE_PREFIX = "/voice "
+SPEAK_LAST_COMMAND = "/speak-last"
 
 
 def confirm_tool(request: PermissionRequest) -> bool:
@@ -80,6 +82,32 @@ def run_terminal(
         if user_input.lower() in EXIT_COMMANDS:
             write("Goodbye.")
             return
+        if user_input.lower() == SPEAK_LAST_COMMAND:
+            if tool_registry is None:
+                write("Ato error: Voice tools are unavailable.")
+                continue
+            last_reply = next(
+                (
+                    message.content
+                    for message in reversed(agent.conversation)
+                    if message.role is Role.ASSISTANT
+                ),
+                None,
+            )
+            if last_reply is None:
+                write("Ato error: There is no assistant reply to speak yet.")
+                continue
+            try:
+                tool_registry.execute(
+                    "speak_text",
+                    {"text": last_reply},
+                    user_request=user_input,
+                )
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Finished speaking the latest reply.")
+            continue
         if user_input.lower().startswith(VOICE_PREFIX):
             if tool_registry is None:
                 write("Ato error: Voice tools are unavailable.")
