@@ -24,3 +24,18 @@ def test_live_public_https_fetch() -> None:
     assert "Example Domain" in result["title"]
     assert result["text"]
     assert result["truncated"] is False
+
+
+@pytest.mark.skipif(
+    os.getenv("ATO_RUN_LIVE_WEB_TESTS") != "1",
+    reason="Set ATO_RUN_LIVE_WEB_TESTS=1 to permit real external HTTPS requests.",
+)
+def test_live_public_pdf_fetch() -> None:
+    url = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+    result = json.loads(fetch_web_page(url))
+
+    assert result["status"] == 200
+    assert result["source_url"] == url
+    assert result["document_type"] == "pdf"
+    assert result["pages"] == 1
+    assert "Dummy PDF file" in result["text"]

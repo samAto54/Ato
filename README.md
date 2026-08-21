@@ -19,6 +19,7 @@ The current Phase 5 build provides:
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
 - Confirmed, bounded public HTTPS page fetching with readable-text extraction
+- Page-labelled text extraction from bounded public PDF sources
 - Injection-resistant external evidence labels and exact-URL citation instructions
 - Optional confirmed Tavily or Brave web search with bounded, untrusted result snippets
 - Bounded, versioned JSON memory with atomic writes
@@ -157,7 +158,10 @@ The first research tool, `fetch_web_page`, retrieves readable text from one URL 
 address, connects directly to a validated public IP with normal TLS hostname verification,
 and refuses localhost, private, link-local, reserved, credential-bearing, and non-HTTPS URLs.
 Redirects are not followed because each destination requires separate approval. Responses
-must be uncompressed HTML or plain text and stay within fixed timeout, byte, and output limits.
+must be uncompressed HTML, plain text, or PDF and stay within fixed timeout, byte, page, and
+output limits. Public PDFs are capped at 10 MB and 100 pages, retain `[PDF page N]` markers,
+and use `pypdf` for text extraction. Encrypted, malformed, oversized, and image-only PDFs are
+rejected; OCR and visual/layout interpretation remain future work.
 Every permission decision and execution result uses Ato's existing audit pipeline.
 Fetched results include an exact `source_url` and an `untrusted_external` trust label. Ato's
 system policy treats all webpage text as evidence rather than instructions, ignores action

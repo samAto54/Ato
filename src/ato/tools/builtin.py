@@ -602,7 +602,8 @@ def build_phase3_registry(
             name="fetch_web_page",
             description=(
                 "Fetch readable text from one explicitly approved public HTTPS page. "
-                "Blocks private networks and redirects and enforces strict size and timeout limits."
+                "Supports bounded HTML, plain text, and text-based PDF sources. Blocks private "
+                "networks and redirects and enforces strict size, page, and timeout limits."
             ),
             parameters={
                 "type": "object",
