@@ -25,6 +25,7 @@ RepositoryRequester = Callable[[urllib.request.Request, int], bytes]
 MAX_GITHUB_ISSUE_TITLE_CHARS = 200
 MAX_GITHUB_ISSUE_BODY_CHARS = 10_000
 MAX_GITHUB_ISSUE_LABELS = 10
+MAX_GITHUB_COMMENT_CHARS = 10_000
 
 
 class GitHubClient:
@@ -42,6 +43,7 @@ class GitHubClient:
         self._token = token
         self._requester = requester or _request_bytes
         self._submitted_issue_fingerprints: set[str] = set()
+        self._submitted_comment_fingerprints: set[str] = set()
 
     @property
     def can_write(self) -> bool:
@@ -163,6 +165,51 @@ class GitHubClient:
             "issue_sha256": fingerprint,
         }
 
+    def preview_comment(self, issue_number: int, body: str) -> dict[str, Any]:
+        normalized_body = _validate_comment(issue_number, body)
+        fingerprint = _comment_fingerprint(self.repository, issue_number, normalized_body)
+        return {
+            "repository": self.repository,
+            "issue_number": issue_number,
+            "body": normalized_body,
+            "comment_sha256": fingerprint,
+        }
+
+    def create_comment(
+        self,
+        issue_number: int,
+        body: str,
+        expected_repository: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
+        if not self._token:
+            raise ToolError("GitHub issue comment creation requires GITHUB_TOKEN.")
+        preview = self.preview_comment(issue_number, body)
+        if expected_repository != self.repository:
+            raise ToolError("Configured GitHub repository differs from the reviewed repository.")
+        if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+            raise ToolError("expected_sha256 must be a 64-character SHA-256 digest.")
+        fingerprint = preview["comment_sha256"]
+        if expected_sha256.casefold() != fingerprint:
+            raise ToolError("GitHub comment differs from the reviewed preview.")
+        if fingerprint in self._submitted_comment_fingerprints:
+            raise ToolError("This exact GitHub comment was already submitted during this session.")
+        payload = self._request(
+            f"/repos/{self.repository}/issues/{issue_number}/comments",
+            method="POST",
+            body={"body": preview["body"]},
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("id"), int):
+            raise ToolError("GitHub returned an unexpected comment-creation response.")
+        self._submitted_comment_fingerprints.add(fingerprint)
+        return {
+            "id": payload["id"],
+            "issue_number": issue_number,
+            "html_url": payload.get("html_url"),
+            "repository": self.repository,
+            "comment_sha256": fingerprint,
+        }
+
     def _get(self, path: str, query: dict[str, str] | None = None) -> Any:
         return self._request(path, query=query)
 
@@ -220,6 +267,24 @@ def _validate_issue(title: str, body: str, labels: list[str]) -> tuple[str, str,
 def _issue_fingerprint(repository: str, title: str, body: str, labels: list[str]) -> str:
     contract = json.dumps(
         {"repository": repository, "title": title, "body": body, "labels": labels},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(contract).hexdigest()
+
+
+def _validate_comment(issue_number: int, body: str) -> str:
+    if issue_number < 1:
+        raise ToolError("GitHub issue number must be positive.")
+    normalized = body.strip()
+    if not normalized or len(normalized) > MAX_GITHUB_COMMENT_CHARS:
+        raise ToolError("GitHub comment must be 1-10,000 non-whitespace characters.")
+    return normalized
+
+
+def _comment_fingerprint(repository: str, issue_number: int, body: str) -> str:
+    contract = json.dumps(
+        {"repository": repository, "issue_number": issue_number, "body": body},
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")

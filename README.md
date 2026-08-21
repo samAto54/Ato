@@ -38,6 +38,7 @@ The current Phase 9 build provides:
 - CRITICAL-confirmation numeric-only Python execution with conservative syntax validation
 - Confirmed read-only GitHub access for one configured repository
 - Preview-guarded, HIGH-confirmation GitHub issue creation
+- Preview-guarded comments targeting one exact GitHub issue number
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -170,6 +171,13 @@ cannot be submitted again during that Ato process. This in-memory duplicate guar
 whether GitHub created an issue after an ambiguous connection failure, so Ato must not retry such
 a request without renewed user review. Issue comments, edits, closure, pull-request mutation,
 repository-file writes, merges, and pushes remain unavailable.
+
+Issue comments use the same guarded pattern. `preview_github_comment` locally validates a positive
+issue number and a non-empty body capped at 10,000 characters, then fingerprints the repository,
+issue number, and normalized body together. `create_github_comment` requires `HIGH` confirmation,
+a token, and an exact fingerprint match before posting. A known successful fingerprint cannot be
+submitted twice in one process. Comments cannot be edited or deleted, and an ambiguous network
+failure must be reviewed instead of automatically retried.
 
 ## Run Ato
 

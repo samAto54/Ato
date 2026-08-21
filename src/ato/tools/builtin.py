@@ -508,6 +508,23 @@ def build_phase3_registry(
             )
         )
 
+    def preview_github_comment(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.preview_comment(int(arguments["issue_number"]), str(arguments["body"]))
+        )
+
+    def create_github_comment(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.create_comment(
+                int(arguments["issue_number"]),
+                str(arguments["body"]),
+                str(arguments["expected_repository"]),
+                str(arguments["expected_sha256"]),
+            )
+        )
+
     def verify_code_change(arguments: Mapping[str, Any]) -> str:
         del arguments
         syntax = _verify_python_syntax()
@@ -1058,6 +1075,61 @@ def build_phase3_registry(
                     "additionalProperties": False,
                 },
                 handler=create_github_issue,
+                permission=PermissionLevel.HIGH,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="preview_github_comment",
+                description=(
+                    "Preview one bounded comment for an exact GitHub issue number and return "
+                    "the fingerprint required for confirmed creation. Does not use the network."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "issue_number": {"type": "integer", "minimum": 1},
+                        "body": {"type": "string", "minLength": 1, "maxLength": 10_000},
+                    },
+                    "required": ["issue_number", "body"],
+                    "additionalProperties": False,
+                },
+                handler=preview_github_comment,
+                permission=PermissionLevel.LOW,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="create_github_comment",
+                description=(
+                    "Post exactly one previously previewed comment to an exact GitHub issue "
+                    "after HIGH confirmation. Cannot edit or delete comments."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "issue_number": {"type": "integer", "minimum": 1},
+                        "body": {"type": "string", "minLength": 1, "maxLength": 10_000},
+                        "expected_repository": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 200,
+                        },
+                        "expected_sha256": {
+                            "type": "string",
+                            "minLength": 64,
+                            "maxLength": 64,
+                        },
+                    },
+                    "required": [
+                        "issue_number",
+                        "body",
+                        "expected_repository",
+                        "expected_sha256",
+                    ],
+                    "additionalProperties": False,
+                },
+                handler=create_github_comment,
                 permission=PermissionLevel.HIGH,
             )
         )
