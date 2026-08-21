@@ -243,6 +243,7 @@ def build_phase3_registry(
                 timeout=timeout,
                 check=False,
                 env=environment,
+                shell=False,
             )
         except subprocess.TimeoutExpired as exc:
             raise ToolError(f"The fixed command exceeded its {timeout}-second timeout.") from exc
@@ -356,6 +357,49 @@ def build_phase3_registry(
     def test_project(arguments: Mapping[str, Any]) -> str:
         del arguments
         return run_fixed([sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120)
+
+    def run_allowed_command(arguments: Mapping[str, Any]) -> str:
+        command_id = str(arguments["command"])
+        raw_target = arguments.get("target")
+        if command_id in {"python_version", "git_version"}:
+            if raw_target is not None:
+                raise ToolError(f"The {command_id} command does not accept a target.")
+            command = (
+                [sys.executable, "--version"]
+                if command_id == "python_version"
+                else ["git", "--version"]
+            )
+            timeout = 10
+        else:
+            target = boundary.resolve(str(raw_target or "."))
+            if not target.exists():
+                raise ToolError("The requested command target does not exist.")
+            if command_id == "ruff_check":
+                command = [
+                    sys.executable,
+                    "-m",
+                    "ruff",
+                    "check",
+                    "--no-cache",
+                    str(target),
+                ]
+                timeout = 60
+            elif command_id == "pytest":
+                command = [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "no:cacheprovider",
+                    str(target),
+                ]
+                timeout = 120
+            else:  # The registry schema rejects this before execution.
+                raise ToolError("The requested command is not allowlisted.")
+        result = json.loads(run_fixed(command, timeout))
+        result["command"] = command_id
+        result["timeout_seconds"] = timeout
+        return json.dumps(result)
 
     def verify_code_change(arguments: Mapping[str, Any]) -> str:
         del arguments
@@ -1096,6 +1140,29 @@ def build_phase3_registry(
             ),
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=verify_code_change,
+            permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="run_allowed_command",
+            description=(
+                "Run one named development command profile without a shell or arbitrary "
+                "arguments. Targets are optional and restricted to the workspace."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "enum": ["python_version", "git_version", "ruff_check", "pytest"],
+                    },
+                    "target": {"type": "string", "minLength": 1, "maxLength": 500},
+                },
+                "required": ["command"],
+                "additionalProperties": False,
+            },
+            handler=run_allowed_command,
             permission=PermissionLevel.HIGH,
         )
     )

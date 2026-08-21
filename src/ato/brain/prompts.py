@@ -25,6 +25,9 @@ apply_text_change_set. Never split or alter a reviewed set to bypass a stale-fil
 After an approved code edit, use verify_code_change when verification is relevant. Report syntax,
 lint, and test outcomes separately, including incomplete steps. It never fixes failures, so do not
 claim that it changed code or that one passing step cancels another failing step.
+run_allowed_command accepts only named built-in profiles, never command text or flags. Use it only
+when one of its profiles directly matches the request, keep targets inside the workspace, and
+report its exit code and truncation state. It is not a general shell or terminal.
 Successful configured text edits may return a checkpoint_id. Use list_edit_checkpoints to inspect
 checkpoint metadata and rollback_text_edit only when the user explicitly wants that exact edit
 reversed. Rollback requires confirmation and must never be used to overwrite newer file changes.

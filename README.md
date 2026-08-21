@@ -34,6 +34,7 @@ The current Phase 9 build provides:
 - One-confirmation, non-fixing syntax/lint/test verification with isolated step results
 - Recoverable, one-time text-edit checkpoints with SHA-256-guarded rollback
 - Guarded change sets for up to five files with one combined preview and confirmation
+- HIGH-confirmation execution of four fixed, no-shell development command profiles
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -351,6 +352,11 @@ Inspection tools are deliberately read-only:
   executing them, then runs the same fixed Ruff and pytest commands. Each command output is capped
   at 3,500 characters. Failures and timeouts are reported per step, later steps still run, and
   `automatic_fixes_applied` is always false.
+- `run_allowed_command` requires `HIGH` confirmation and accepts only `python_version`,
+  `git_version`, `ruff_check`, or `pytest`. Callers cannot supply flags or command text. Ruff and
+  pytest may receive one existing workspace path, while version profiles accept no target. Each
+  profile has a fixed timeout, captures and caps output, runs with `shell=False`, and reports its
+  exit code and truncation state. This is a bounded profile runner, not general terminal access.
 
 The first editing tools are deliberately narrow:
 
