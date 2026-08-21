@@ -6,7 +6,7 @@ chatbots.
 
 ## Current functionality
 
-The current Phase 8 build provides:
+The current Phase 9 build provides:
 
 - An interactive terminal conversation
 - Incremental streaming responses in the terminal
@@ -30,6 +30,7 @@ The current Phase 8 build provides:
 - Stable evidence-passage IDs and conservative cross-source numeric disagreement hints
 - Structured research coverage, uncertainty, source-gap, and inference-boundary assessment
 - Local research-session history and confirmed, non-overwriting Markdown evidence exports
+- Read-only unified-diff previews with SHA-256-guarded exact text edits
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -345,8 +346,12 @@ Inspection tools are deliberately read-only:
 The first editing tools are deliberately narrow:
 
 - `create_text_file` creates a new UTF-8 file and refuses to overwrite existing files.
-- `replace_text_in_file` changes one exact text block only when it has a unique match.
-- Both require `HIGH` confirmation, use atomic writes, and cap files at 100,000 bytes.
+- `preview_text_change` validates one unique match and returns a read-only unified diff capped
+  at 10,000 characters, plus original and proposed SHA-256 digests.
+- `replace_text_in_file` changes that exact block only when supplied with the preview's original
+  digest. If the file changed after review, the edit fails and requires a fresh preview.
+- The two writing tools require `HIGH` confirmation, use atomic writes, and cap files at
+  100,000 bytes; previewing remains read-only and `LOW` permission.
 - Environment, credential, private-key, Git metadata, CI workflow, runtime data, symlink,
   and out-of-workspace targets are rejected.
 - `trash_text_file` moves one small UTF-8 file into ignored `data/trash/` storage after

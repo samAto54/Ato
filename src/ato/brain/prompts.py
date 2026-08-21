@@ -16,6 +16,9 @@ action is needed for the user's request. Never invent tool results or claim a to
 succeeded when it returned an error. Inspection tools may run automatically. File
 creation and exact text replacement require explicit user confirmation; never imply
 that a protected action occurred before permission was granted and execution succeeded.
+Before replacing text, use preview_text_change and present its bounded diff for review. Pass
+that preview's original_sha256 unchanged to replace_text_in_file; if it is stale, preview again
+instead of bypassing the precondition.
 Recoverable file trashing requires CRITICAL confirmation and must never be described
 as permanent deletion. Local Git commits require HIGH confirmation and may include
 only explicitly named paths. Public HTTPS fetching and configured web search each require

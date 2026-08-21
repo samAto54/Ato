@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import ast
+import difflib
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -33,6 +36,7 @@ MAX_COMMAND_OUTPUT = 50_000
 MAX_WRITE_BYTES = 100_000
 MAX_COMMIT_PATHS = 20
 MAX_COMMIT_MESSAGE_CHARS = 200
+MAX_PREVIEW_DIFF_CHARS = 10_000
 PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
 PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
@@ -386,22 +390,15 @@ def build_phase3_registry(
         path = boundary.write_target(str(arguments["path"]))
         old_text = str(arguments["old_text"])
         new_text = str(arguments["new_text"])
-        if not old_text:
-            raise ToolError("old_text cannot be empty.")
-        if not path.is_file():
-            raise ToolError("The requested replacement path is not an existing file.")
-        try:
-            if path.stat().st_size > MAX_TEXT_BYTES:
-                raise ToolError(f"File exceeds the {MAX_TEXT_BYTES}-byte modification limit.")
-            original = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            raise ToolError("The requested file is not readable UTF-8 text.") from exc
-        except OSError as exc:
-            raise ToolError("The requested file could not be read.") from exc
-        occurrences = original.count(old_text)
-        if occurrences != 1:
-            raise ToolError(f"old_text must match exactly once; found {occurrences} matches.")
-        updated = original.replace(old_text, new_text, 1)
+        raw_sha256 = str(arguments["expected_sha256"])
+        if not re.fullmatch(r"[a-fA-F0-9]{64}", raw_sha256):
+            raise ToolError("expected_sha256 must be a 64-character hexadecimal SHA-256 digest.")
+        expected_sha256 = raw_sha256.casefold()
+        original = _read_modifiable_text(path)
+        original_sha256 = hashlib.sha256(original.encode("utf-8")).hexdigest()
+        if original_sha256 != expected_sha256:
+            raise ToolError("File changed after preview; request a new preview before editing.")
+        updated = _replace_unique_text(original, old_text, new_text)
         encoded = updated.encode("utf-8")
         if len(encoded) > MAX_WRITE_BYTES:
             raise ToolError(f"Modified file exceeds the {MAX_WRITE_BYTES}-byte limit.")
@@ -410,8 +407,59 @@ def build_phase3_registry(
         except OSError as exc:
             raise ToolError("The text file could not be modified atomically.") from exc
         return json.dumps(
-            {"path": path.relative_to(boundary.root).as_posix(), "bytes": len(encoded)}
+            {
+                "path": path.relative_to(boundary.root).as_posix(),
+                "bytes": len(encoded),
+                "original_sha256": original_sha256,
+                "updated_sha256": hashlib.sha256(encoded).hexdigest(),
+            }
         )
+
+    def preview_text_change(arguments: Mapping[str, Any]) -> str:
+        path = boundary.write_target(str(arguments["path"]))
+        old_text = str(arguments["old_text"])
+        new_text = str(arguments["new_text"])
+        original = _read_modifiable_text(path)
+        updated = _replace_unique_text(original, old_text, new_text)
+        relative = path.relative_to(boundary.root).as_posix()
+        diff = "".join(
+            difflib.unified_diff(
+                original.splitlines(keepends=True),
+                updated.splitlines(keepends=True),
+                fromfile=f"a/{relative}",
+                tofile=f"b/{relative}",
+            )
+        )
+        truncated = len(diff) > MAX_PREVIEW_DIFF_CHARS
+        return json.dumps(
+            {
+                "path": relative,
+                "original_sha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+                "updated_sha256": hashlib.sha256(updated.encode("utf-8")).hexdigest(),
+                "diff": diff[:MAX_PREVIEW_DIFF_CHARS],
+                "diff_truncated": truncated,
+            }
+        )
+
+    def _read_modifiable_text(path: Path) -> str:
+        if not path.is_file():
+            raise ToolError("The requested replacement path is not an existing file.")
+        try:
+            if path.stat().st_size > MAX_TEXT_BYTES:
+                raise ToolError(f"File exceeds the {MAX_TEXT_BYTES}-byte modification limit.")
+            return path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ToolError("The requested file is not readable UTF-8 text.") from exc
+        except OSError as exc:
+            raise ToolError("The requested file could not be read.") from exc
+
+    def _replace_unique_text(original: str, old_text: str, new_text: str) -> str:
+        if not old_text:
+            raise ToolError("old_text cannot be empty.")
+        occurrences = original.count(old_text)
+        if occurrences != 1:
+            raise ToolError(f"old_text must match exactly once; found {occurrences} matches.")
+        return original.replace(old_text, new_text, 1)
 
     def trash_text_file(arguments: Mapping[str, Any]) -> str:
         path = boundary.write_target(str(arguments["path"]))
@@ -441,6 +489,27 @@ def build_phase3_registry(
             }
         )
 
+    registry.register(
+        ToolSpec(
+            name="preview_text_change",
+            description=(
+                "Preview one exact unique text replacement as a bounded unified diff without "
+                "writing. Returns the SHA-256 required by replace_text_in_file."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string", "minLength": 1},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
+                "additionalProperties": False,
+            },
+            handler=preview_text_change,
+            permission=PermissionLevel.LOW,
+        )
+    )
     registry.register(
         ToolSpec(
             name="list_files",
@@ -782,7 +851,7 @@ def build_phase3_registry(
             name="replace_text_in_file",
             description=(
                 "Replace one exact unique text block in an existing UTF-8 workspace file. "
-                "Requires HIGH confirmation."
+                "Requires HIGH confirmation and the SHA-256 returned by preview_text_change."
             ),
             parameters={
                 "type": "object",
@@ -790,8 +859,9 @@ def build_phase3_registry(
                     "path": {"type": "string"},
                     "old_text": {"type": "string"},
                     "new_text": {"type": "string"},
+                    "expected_sha256": {"type": "string", "minLength": 64, "maxLength": 64},
                 },
-                "required": ["path", "old_text", "new_text"],
+                "required": ["path", "old_text", "new_text", "expected_sha256"],
                 "additionalProperties": False,
             },
             handler=replace_text_in_file,
