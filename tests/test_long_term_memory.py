@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ato.brain.memory import CompositeMemoryRetriever, MemoryItem
 from ato.exceptions import MemoryStoreError
 from ato.memory import MemoryCategory, SqliteLongTermMemory
 
@@ -140,3 +141,52 @@ def test_lifecycle_migration_backfills_update_timestamp(tmp_path) -> None:
     assert record.last_retrieved_at is None
     assert record.archived_at is None
     assert record.expires_at is None
+
+
+def test_memory_ranking_uses_phrase_order_and_category_intent(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    preference = store.remember(
+        "My response style is detailed.", MemoryCategory.PREFERENCE
+    )
+    store.remember("My response style is concise.", MemoryCategory.FACT)
+    phrase_match = store.remember("The Alpha launch plan starts Tuesday.", MemoryCategory.PROJECT)
+    store.remember("Tuesday reviews cover the Alpha plan before launch.", MemoryCategory.PROJECT)
+
+    assert store.search("What is my response style preference?")[0] == preference
+    assert store.search("Alpha launch plan Tuesday")[0] == phrase_match
+
+
+def test_memory_deduplication_preserves_conflicting_facts(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    store.remember("My favorite color is green.", MemoryCategory.PREFERENCE)
+    store.remember("my FAVORITE color is green!", MemoryCategory.PREFERENCE)
+    blue = store.remember("My favorite color is blue.", MemoryCategory.PREFERENCE)
+
+    results = store.search("What is my favorite color?", limit=5)
+
+    assert len(results) == 2
+    assert blue in results
+    assert any("green" in item.content.casefold() for item in results)
+
+
+def test_composite_memory_retrieval_deduplicates_sources_and_preserves_fairness() -> None:
+    class Retriever:
+        def __init__(self, *items: MemoryItem) -> None:
+            self.items = items
+
+        def search(self, query: str, limit: int = 5) -> tuple[MemoryItem, ...]:
+            del query
+            return self.items[:limit]
+
+    shared = "Ato uses SQLite for durable memory."
+    composite = CompositeMemoryRetriever(
+        Retriever(MemoryItem(1, shared), MemoryItem(2, "First source detail.")),
+        Retriever(
+            MemoryItem(9, "ATO uses sqlite for durable memory!", "knowledge design.md#0"),
+            MemoryItem(10, "Second source."),
+        ),
+    )
+
+    results = composite.search("memory design", limit=3)
+
+    assert [item.content for item in results] == [shared, "First source detail.", "Second source."]

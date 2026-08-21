@@ -229,14 +229,14 @@ class SqliteLongTermMemory:
         return cursor.rowcount > 0
 
     def search(self, query: str, limit: int = 5) -> tuple[MemoryItem, ...]:
-        """Rank a bounded candidate set by case-insensitive word overlap."""
+        """Rank a bounded candidate set with deterministic lexical and category signals."""
         if not 1 <= limit <= 20:
             raise ValueError("limit must be between 1 and 20.")
-        query_terms = {
-            term for term in WORD_PATTERN.findall(query.casefold()) if term not in STOP_WORDS
-        }
+        query_terms = _meaningful_terms(query)
         if not query_terms:
             return ()
+        query_set = set(query_terms)
+        intended_categories = _infer_categories(query_terms)
         try:
             with self._connect() as connection:
                 rows = connection.execute(
@@ -250,17 +250,29 @@ class SqliteLongTermMemory:
         ranked: list[tuple[float, int, MemoryItem]] = []
         for row in rows:
             item = _memory_item(int(row[0]), str(row[1]), str(row[2]))
-            terms = {
-                term
-                for term in WORD_PATTERN.findall(item.content.casefold())
-                if term not in STOP_WORDS
-            }
-            overlap = query_terms & terms
+            content_terms = _meaningful_terms(item.content)
+            overlap = query_set & set(content_terms)
             if overlap:
-                score = len(overlap) / len(query_terms)
+                score = _relevance_score(
+                    query_terms,
+                    content_terms,
+                    overlap,
+                    _validate_category(str(row[2])),
+                    intended_categories,
+                )
                 ranked.append((score, item.id, item))
         ranked.sort(key=lambda entry: (entry[0], entry[1]), reverse=True)
-        results = tuple(entry[2] for entry in ranked[:limit])
+        selected: list[MemoryItem] = []
+        seen: set[str] = set()
+        for _, _, item in ranked:
+            key = _dedupe_key(item.content)
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(item)
+            if len(selected) >= limit:
+                break
+        results = tuple(selected)
         if results:
             try:
                 with self._connect() as connection:
@@ -357,3 +369,40 @@ def _record_from_row(row: sqlite3.Row | tuple[object, ...]) -> MemoryRecord:
         archived_at=None if row[6] is None else str(row[6]),
         expires_at=None if row[7] is None else str(row[7]),
     )
+
+
+def _meaningful_terms(value: str) -> tuple[str, ...]:
+    return tuple(
+        term for term in WORD_PATTERN.findall(value.casefold()) if term not in STOP_WORDS
+    )
+
+
+def _infer_categories(terms: tuple[str, ...]) -> set[MemoryCategory]:
+    term_set = set(terms)
+    categories: set[MemoryCategory] = set()
+    if term_set & {"prefer", "preference", "favorite", "favourite", "style"}:
+        categories.add(MemoryCategory.PREFERENCE)
+    if term_set & {"project", "roadmap", "code", "implementation", "ato"}:
+        categories.add(MemoryCategory.PROJECT)
+    if term_set & {"decide", "decided", "decision", "choose", "chose", "selected"}:
+        categories.add(MemoryCategory.DECISION)
+    return categories
+
+
+def _relevance_score(
+    query_terms: tuple[str, ...],
+    content_terms: tuple[str, ...],
+    overlap: set[str],
+    category: MemoryCategory,
+    intended_categories: set[MemoryCategory],
+) -> float:
+    coverage = len(overlap) / len(set(query_terms))
+    query_pairs = set(zip(query_terms, query_terms[1:], strict=False))
+    content_pairs = set(zip(content_terms, content_terms[1:], strict=False))
+    phrase_score = len(query_pairs & content_pairs) / max(1, len(query_pairs))
+    category_score = 1.0 if category in intended_categories else 0.0
+    return coverage * 4.0 + phrase_score * 1.5 + category_score
+
+
+def _dedupe_key(content: str) -> str:
+    return " ".join(WORD_PATTERN.findall(content.casefold()))

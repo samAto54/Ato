@@ -18,6 +18,7 @@ The current Phase 7 build provides:
 - Confirmed correction and deletion of individual long-term memories by ID
 - Categorized long-term memory for facts, preferences, projects, and decisions
 - Memory lifecycle controls for retrieval tracking, archiving, restoration, and expiration
+- Deterministic phrase- and category-aware memory ranking with redundant-context filtering
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
@@ -244,6 +245,12 @@ retrieval. `/archive-memory <id>` hides a memory without deleting it, while
 expired records. Lifecycle changes require confirmation. Created, updated, and last-retrieved
 timestamps are maintained locally; existing databases migrate automatically. Archived and
 expired entries are excluded before relevant context is sent to the model.
+
+Memory retrieval combines bounded word coverage, adjacent phrase matches, and explicit intent
+signals for preferences, projects, and decisions. Normalized duplicates that differ only in
+case, spacing, or punctuation are collapsed before reaching the model, including duplicates
+returned by different memory sources. Distinct or conflicting facts are preserved so Ato does
+not hide uncertainty. Ranking remains deterministic, local, and limited to a fixed candidate set.
 
 Local RAG is available through `/ingest <workspace-path>`, `/knowledge`, and confirmed
 `/remove-document <id>` commands. Ingestion accepts UTF-8 TXT, Markdown, CSV, JSON,
