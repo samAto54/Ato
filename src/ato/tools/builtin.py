@@ -19,6 +19,7 @@ from uuid import uuid4
 
 from ato.coding import SqliteEditCheckpointStore
 from ato.exceptions import CheckpointStoreError, ToolError
+from ato.notifications import Notification, Notifier
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
@@ -108,6 +109,7 @@ def build_phase3_registry(
     research_store: SqliteResearchStore | None = None,
     checkpoint_store: SqliteEditCheckpointStore | None = None,
     github_client: GitHubClient | None = None,
+    notifier: Notifier | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -483,6 +485,23 @@ def build_phase3_registry(
                 "operation": operation,
                 "untrusted_external": True,
                 "result": result,
+            }
+        )
+
+    def send_notification(arguments: Mapping[str, Any]) -> str:
+        assert notifier is not None
+        notification = Notification.validated(
+            str(arguments["title"]),
+            str(arguments["message"]),
+            str(arguments.get("level", "info")),
+        )
+        provider = notifier.send(notification)
+        return json.dumps(
+            {
+                "delivered": True,
+                "provider": provider,
+                "level": notification.level.value,
+                "title": notification.title,
             }
         )
 
@@ -1043,6 +1062,7 @@ def build_phase3_registry(
                 permission=PermissionLevel.MEDIUM,
             )
         )
+    if github_client is not None:
         registry.register(
             ToolSpec(
                 name="preview_github_issue",
@@ -1104,6 +1124,7 @@ def build_phase3_registry(
                 permission=PermissionLevel.HIGH,
             )
         )
+    if github_client is not None:
         registry.register(
             ToolSpec(
                 name="preview_github_comment",
@@ -1216,6 +1237,31 @@ def build_phase3_registry(
                 },
                 handler=create_github_pull_request,
                 permission=PermissionLevel.HIGH,
+            )
+        )
+    if notifier is not None:
+        registry.register(
+            ToolSpec(
+                name="send_notification",
+                description=(
+                    "Send one clearly labelled local notification through the configured "
+                    "provider after MEDIUM confirmation."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "minLength": 1, "maxLength": 100},
+                        "message": {"type": "string", "minLength": 1, "maxLength": 1_000},
+                        "level": {
+                            "type": "string",
+                            "enum": ["info", "success", "warning", "error"],
+                        },
+                    },
+                    "required": ["title", "message"],
+                    "additionalProperties": False,
+                },
+                handler=send_notification,
+                permission=PermissionLevel.MEDIUM,
             )
         )
     registry.register(

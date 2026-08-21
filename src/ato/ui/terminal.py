@@ -15,6 +15,7 @@ from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, MemoryCategory, SqliteLongTermMemory
+from ato.notifications import TerminalNotifier
 from ato.providers import DeepSeekProvider
 from ato.research import SqliteResearchStore
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
@@ -441,6 +442,7 @@ def main() -> None:
                 if settings.github_repository
                 else None
             ),
+            notifier=TerminalNotifier(),
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")
