@@ -41,6 +41,7 @@ The current Phase 9 build provides:
 - Preview-guarded comments targeting one exact GitHub issue number
 - Preview-guarded pull-request creation between existing same-repository branches
 - Provider-neutral notifications with confirmed, clearly labelled terminal delivery
+- HIGH-confirmation, write-only Windows clipboard support with secret rejection
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -76,6 +77,7 @@ ideas can be migrated during the appropriate phases without destabilizing Phase 
 ato/
 |-- src/ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
+|   |-- computer/       # Controlled local-computer providers such as clipboard writes
 |   |-- knowledge/      # Local document ingestion, chunking, and retrieval
 |   |-- memory/         # Conversation JSON and durable SQLite fact persistence
 |   |-- notifications/  # Provider-neutral notifications and terminal delivery
@@ -201,6 +203,15 @@ silently impersonate a notification. Titles are one line and capped at 100 chara
 are capped at 1,000. Unsafe terminal control characters are rejected, and every attempt uses the
 normal audit path. This phase does not provide Windows toast notifications, background delivery,
 external messaging, scheduling, alarms, or any guarantee that the user will see the message.
+
+The first clipboard capability is write-only. `write_clipboard` requires `HIGH` confirmation and
+replaces the Windows text clipboard with 1-10,000 characters. Content is delivered to a fixed,
+non-interactive PowerShell `Set-Clipboard` command only through standard input, with
+`shell=False` and a five-second timeout; clipboard text is never interpolated into command text.
+Likely API keys, bearer tokens, passwords, private keys, unsupported control characters, and
+oversized content are rejected. Audit records contain only the text length and SHA-256 digest.
+Ato cannot read the clipboard, see or preserve its previous value, restore overwritten clipboard
+content, handle images, or synchronize the clipboard externally.
 
 ## Run Ato
 

@@ -18,6 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from ato.coding import SqliteEditCheckpointStore
+from ato.computer import ClipboardWriter, validate_clipboard_text
 from ato.exceptions import CheckpointStoreError, ToolError
 from ato.notifications import Notification, Notifier
 from ato.research import SqliteResearchStore
@@ -110,6 +111,7 @@ def build_phase3_registry(
     checkpoint_store: SqliteEditCheckpointStore | None = None,
     github_client: GitHubClient | None = None,
     notifier: Notifier | None = None,
+    clipboard_writer: ClipboardWriter | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -504,6 +506,13 @@ def build_phase3_registry(
                 "title": notification.title,
             }
         )
+
+    def write_clipboard(arguments: Mapping[str, Any]) -> str:
+        assert clipboard_writer is not None
+        text = str(arguments["text"])
+        summary = validate_clipboard_text(text)
+        clipboard_writer.write(text)
+        return json.dumps({"written": True, "provider": "windows", **summary})
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
         assert github_client is not None
@@ -1262,6 +1271,26 @@ def build_phase3_registry(
                 },
                 handler=send_notification,
                 permission=PermissionLevel.MEDIUM,
+            )
+        )
+    if clipboard_writer is not None:
+        registry.register(
+            ToolSpec(
+                name="write_clipboard",
+                description=(
+                    "Replace the local text clipboard with bounded non-secret text after HIGH "
+                    "confirmation. Cannot read the clipboard."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1, "maxLength": 10_000}
+                    },
+                    "required": ["text"],
+                    "additionalProperties": False,
+                },
+                handler=write_clipboard,
+                permission=PermissionLevel.HIGH,
             )
         )
     registry.register(
