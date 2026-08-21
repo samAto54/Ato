@@ -133,9 +133,22 @@ def run_terminal(
                 write(f"Ato error: {exc}")
                 continue
             write(f"Ato transcript (review before submitting): {transcript}")
-            approval = read("Submit this transcript to Ato? [y/N]: ").strip().lower()
-            if approval not in {"y", "yes"}:
+            while True:
+                approval = read("Submit, edit, or cancel? [y/e/N]: ").strip().lower()
+                if approval in {"e", "edit"}:
+                    edited_transcript = read("Edited transcript: ").strip()
+                    if not edited_transcript:
+                        write("Ato error: Edited transcript cannot be empty.")
+                        continue
+                    transcript = edited_transcript
+                    write(f"Ato transcript (review before submitting): {transcript}")
+                    continue
+                if approval in {"y", "yes"}:
+                    break
                 write("Ato: Voice turn cancelled; transcript was not submitted.")
+                transcript = ""
+                break
+            if not transcript:
                 continue
             _deliver_agent_turn(
                 agent,

@@ -49,7 +49,7 @@ The current build provides:
 - Optional CRITICAL-confirmation one-shot microphone recording without background listening
 - Optional local-model offline WAV transcription with no automatic downloads or uploads
 - Reviewed `/voice <seconds>` turns that require explicit recording and transcription
-  permissions, show the transcript, and submit it only after user approval
+  permissions, allow transcript correction, and submit only after user approval
 - Explicit `/speak-last` playback of the latest assistant reply through confirmed offline TTS
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
@@ -258,9 +258,11 @@ This does not remove separately approved long-term facts.
 When microphone recording and local transcription are configured, enter `/voice 5` to record a
 five-second voice turn. Ato separately confirms the CRITICAL recording and HIGH transcription
 operations, displays the resulting transcript, and asks whether to submit it. A cancelled
-transcript never reaches the agent. An approved transcript is passed directly as conversation
-text—even if it resembles a slash command—so speech cannot trigger terminal commands. Voice input
-is always user-initiated; Ato does not listen in the background and has no wake-word support.
+transcript never reaches the agent. Choose `e` at the review prompt to replace an inaccurate
+transcript, then review the corrected text before approving it. Empty corrections are rejected.
+An approved original or corrected transcript is passed directly as conversation text—even if it
+resembles a slash command—so speech cannot trigger terminal commands. Voice input is always
+user-initiated; Ato does not listen in the background and has no wake-word support.
 
 Enter `/speak-last` to read the newest assistant reply aloud. Ato uses the same bounded offline
 Windows speech provider as `speak_text` and requests HIGH permission before each playback. It does

@@ -103,6 +103,54 @@ def test_approved_voice_transcript_bypasses_terminal_commands(tmp_path) -> None:
     assert llm.prompts == ["/clear-memory"]
 
 
+def test_voice_transcript_can_be_edited_and_reviewed_again(tmp_path) -> None:
+    llm = RecordingLLM()
+    output: list[str] = []
+    inputs = iter(["/voice 2", "edit", "corrected transcript", "yes", "quit"])
+
+    run_terminal(
+        Agent(llm),
+        tool_registry=_registry(tmp_path, "incorrect transcript"),
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert llm.prompts == ["corrected transcript"]
+    assert output.count(
+        "Ato transcript (review before submitting): corrected transcript"
+    ) == 1
+
+
+def test_edited_voice_transcript_still_bypasses_terminal_commands(tmp_path) -> None:
+    llm = RecordingLLM()
+    inputs = iter(["/voice 2", "e", "/clear-memory", "y", "quit"])
+
+    run_terminal(
+        Agent(llm),
+        tool_registry=_registry(tmp_path, "incorrect"),
+        read=lambda prompt: next(inputs),
+        write=lambda text: None,
+    )
+
+    assert llm.prompts == ["/clear-memory"]
+
+
+def test_empty_voice_transcript_edit_is_rejected(tmp_path) -> None:
+    llm = RecordingLLM()
+    output: list[str] = []
+    inputs = iter(["/voice 2", "e", "   ", "n", "quit"])
+
+    run_terminal(
+        Agent(llm),
+        tool_registry=_registry(tmp_path, "original"),
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert llm.prompts == []
+    assert "Ato error: Edited transcript cannot be empty." in output
+
+
 def test_voice_command_reports_unavailable_tools() -> None:
     output: list[str] = []
     inputs = iter(["/voice 2", "quit"])
