@@ -17,6 +17,7 @@ The current Phase 7 build provides:
 - Explicit SQLite long-term facts with bounded relevance retrieval
 - Confirmed correction and deletion of individual long-term memories by ID
 - Categorized long-term memory for facts, preferences, projects, and decisions
+- Memory lifecycle controls for retrieval tracking, archiving, restoration, and expiration
 - Local document ingestion and retrieval for text, Markdown, CSV, source code, PDF, and DOCX
 - Local SQLite FTS5/BM25 knowledge ranking with automatic index migration and lexical fallback
 - Injection-resistant JSON retrieval context with source-label citation instructions
@@ -234,6 +235,15 @@ Relevant facts are retrieved with bounded local
 keyword matching and injected as data rather than instructions. Likely passwords,
 API keys, tokens, and secrets are rejected. The SQLite database is local plain text,
 is excluded from Git, and should be protected using normal operating-system access controls.
+
+Phase 7 lifecycle commands provide reversible control over when memories participate in
+retrieval. `/archive-memory <id>` hides a memory without deleting it, while
+`/restore-memory <id>` makes an archived, unexpired memory active again.
+`/expire-memory <id> <days>` sets an expiration from 1 to 3,650 days and
+`/clear-memory-expiration <id>` removes it. `/all-memories` displays active, archived, and
+expired records. Lifecycle changes require confirmation. Created, updated, and last-retrieved
+timestamps are maintained locally; existing databases migrate automatically. Archived and
+expired entries are excluded before relevant context is sent to the model.
 
 Local RAG is available through `/ingest <workspace-path>`, `/knowledge`, and confirmed
 `/remove-document <id>` commands. Ingestion accepts UTF-8 TXT, Markdown, CSV, JSON,

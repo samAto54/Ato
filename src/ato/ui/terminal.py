@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
@@ -24,6 +25,11 @@ LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
 FORGET_PREFIX = "/forget "
 EDIT_MEMORY_PREFIX = "/edit-memory "
+LIST_ALL_MEMORIES_COMMAND = "/all-memories"
+ARCHIVE_MEMORY_PREFIX = "/archive-memory "
+RESTORE_MEMORY_PREFIX = "/restore-memory "
+EXPIRE_MEMORY_PREFIX = "/expire-memory "
+CLEAR_EXPIRATION_PREFIX = "/clear-memory-expiration "
 INGEST_PREFIX = "/ingest "
 LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
@@ -162,6 +168,100 @@ def run_terminal(
         if user_input.lower() == EDIT_MEMORY_PREFIX.strip():
             write("Ato error: Use /edit-memory <id> <replacement fact>.")
             continue
+        if user_input.lower() == LIST_ALL_MEMORIES_COMMAND:
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            try:
+                records = long_term_memory.list_records(include_inactive=True)
+            except AtoError as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato memory lifecycle records:" if records else "Ato: No memories saved.")
+                now = datetime.now(UTC).isoformat()
+                for record in records:
+                    if record.archived_at is not None:
+                        status = "archived"
+                    elif record.expires_at is not None and record.expires_at <= now:
+                        status = "expired"
+                    else:
+                        status = "active"
+                    write(f"  {record.id} [{record.category.value}, {status}]: {record.content}")
+            continue
+        lifecycle_usage = {
+            ARCHIVE_MEMORY_PREFIX.strip(): "/archive-memory <id>",
+            RESTORE_MEMORY_PREFIX.strip(): "/restore-memory <id>",
+            EXPIRE_MEMORY_PREFIX.strip(): "/expire-memory <id> <days from 1 to 3650>",
+            CLEAR_EXPIRATION_PREFIX.strip(): "/clear-memory-expiration <id>",
+        }
+        if user_input.lower() in lifecycle_usage:
+            write(f"Ato error: Use {lifecycle_usage[user_input.lower()]}.")
+            continue
+        if user_input.lower().startswith(ARCHIVE_MEMORY_PREFIX):
+            _handle_memory_archive_change(
+                user_input[len(ARCHIVE_MEMORY_PREFIX) :],
+                archive=True,
+                store=long_term_memory,
+                read=read,
+                write=write,
+            )
+            continue
+        if user_input.lower().startswith(RESTORE_MEMORY_PREFIX):
+            _handle_memory_archive_change(
+                user_input[len(RESTORE_MEMORY_PREFIX) :],
+                archive=False,
+                store=long_term_memory,
+                read=read,
+                write=write,
+            )
+            continue
+        if user_input.lower().startswith(EXPIRE_MEMORY_PREFIX):
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            raw_id, separator, raw_days = user_input[len(EXPIRE_MEMORY_PREFIX) :].partition(" ")
+            try:
+                memory_id = int(raw_id)
+                days = int(raw_days) if separator else 0
+                if not 1 <= days <= 3650:
+                    raise ValueError
+            except ValueError:
+                write("Ato error: Use /expire-memory <id> <days from 1 to 3650>.")
+                continue
+            answer = read(f"Expire memory {memory_id} in {days} days? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                write("Ato: Expiration change cancelled.")
+                continue
+            try:
+                changed = long_term_memory.set_expiration(
+                    memory_id, datetime.now(UTC) + timedelta(days=days)
+                )
+            except (AtoError, ValueError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Expiration set." if changed else "Ato: Memory ID not found.")
+            continue
+        if user_input.lower().startswith(CLEAR_EXPIRATION_PREFIX):
+            if long_term_memory is None:
+                write("Ato error: Long-term memory is unavailable.")
+                continue
+            raw_id = user_input[len(CLEAR_EXPIRATION_PREFIX) :].strip()
+            try:
+                memory_id = int(raw_id)
+            except ValueError:
+                write("Ato error: Use /clear-memory-expiration <id>.")
+                continue
+            answer = read(f"Clear expiration for memory {memory_id}? [y/N]: ").strip().lower()
+            if answer not in {"y", "yes"}:
+                write("Ato: Expiration change cancelled.")
+                continue
+            try:
+                changed = long_term_memory.set_expiration(memory_id, None)
+            except (AtoError, ValueError) as exc:
+                write(f"Ato error: {exc}")
+            else:
+                write("Ato: Expiration cleared." if changed else "Ato: Memory ID not found.")
+            continue
         if user_input.lower().startswith(INGEST_PREFIX):
             if knowledge_store is None:
                 write("Ato error: Knowledge storage is unavailable.")
@@ -271,6 +371,37 @@ def _parse_memory_content(value: str) -> tuple[str, MemoryCategory | None]:
         except ValueError:
             pass
     return value.strip(), None
+
+
+def _handle_memory_archive_change(
+    raw_id: str,
+    *,
+    archive: bool,
+    store: SqliteLongTermMemory | None,
+    read: Callable[[str], str],
+    write: Callable[[str], None],
+) -> None:
+    """Confirm and apply one archive or restore operation."""
+    if store is None:
+        write("Ato error: Long-term memory is unavailable.")
+        return
+    try:
+        memory_id = int(raw_id.strip())
+    except ValueError:
+        command = "/archive-memory" if archive else "/restore-memory"
+        write(f"Ato error: Use {command} <id>.")
+        return
+    verb = "Archive" if archive else "Restore"
+    answer = read(f"{verb} long-term memory {memory_id}? [y/N]: ").strip().lower()
+    if answer not in {"y", "yes"}:
+        write(f"Ato: Memory {verb.casefold()} cancelled.")
+        return
+    try:
+        changed = store.archive(memory_id) if archive else store.restore(memory_id)
+    except (AtoError, ValueError) as exc:
+        write(f"Ato error: {exc}")
+    else:
+        write(f"Ato: Memory {verb.casefold()}d." if changed else "Ato: Memory ID not found.")
 
 
 def main() -> None:

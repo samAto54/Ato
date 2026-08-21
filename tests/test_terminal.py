@@ -114,6 +114,40 @@ def test_terminal_manages_explicit_long_term_memories(tmp_path) -> None:
     assert store.list_memories() == ()
 
 
+def test_terminal_manages_memory_lifecycle(tmp_path) -> None:
+    store = SqliteLongTermMemory(tmp_path / "facts.db")
+    store.remember("Temporary project detail.", "project")
+    inputs = iter(
+        [
+            "/archive-memory 1",
+            "yes",
+            "/all-memories",
+            "/restore-memory 1",
+            "yes",
+            "/expire-memory 1 30",
+            "yes",
+            "/clear-memory-expiration 1",
+            "yes",
+            "quit",
+        ]
+    )
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM(), memory_retriever=store),
+        long_term_memory=store,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert "Ato: Memory archived." in output
+    assert "  1 [project, archived]: Temporary project detail." in output
+    assert "Ato: Memory restored." in output
+    assert "Ato: Expiration set." in output
+    assert "Ato: Expiration cleared." in output
+    assert store.list_memories()[0].content == "Temporary project detail."
+
+
 def test_terminal_manages_knowledge_documents(tmp_path) -> None:
     (tmp_path / "notes.md").write_text("Ato knowledge", encoding="utf-8")
     store = SqliteKnowledgeStore(tmp_path / "data" / "knowledge.db", tmp_path)
