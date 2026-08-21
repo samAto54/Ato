@@ -31,6 +31,7 @@ The current Phase 9 build provides:
 - Structured research coverage, uncertainty, source-gap, and inference-boundary assessment
 - Local research-session history and confirmed, non-overwriting Markdown evidence exports
 - Read-only unified-diff previews with SHA-256-guarded exact text edits
+- One-confirmation, non-fixing syntax/lint/test verification with isolated step results
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -342,6 +343,10 @@ Inspection tools are deliberately read-only:
 - `git_diff` and `git_log` use fixed commands, timeouts, and capped output.
 - `lint_project` runs only Ruff and requires `MEDIUM` permission.
 - `test_project` runs only pytest and requires `HIGH` permission because tests execute code.
+- `verify_code_change` requires one `HIGH` confirmation, parses up to 500 Python files without
+  executing them, then runs the same fixed Ruff and pytest commands. Each command output is capped
+  at 3,500 characters. Failures and timeouts are reported per step, later steps still run, and
+  `automatic_fixes_applied` is always false.
 
 The first editing tools are deliberately narrow:
 

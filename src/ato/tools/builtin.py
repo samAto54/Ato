@@ -37,6 +37,9 @@ MAX_WRITE_BYTES = 100_000
 MAX_COMMIT_PATHS = 20
 MAX_COMMIT_MESSAGE_CHARS = 200
 MAX_PREVIEW_DIFF_CHARS = 10_000
+MAX_VERIFY_PYTHON_FILES = 500
+MAX_VERIFY_SYNTAX_ERRORS = 20
+MAX_VERIFY_STEP_OUTPUT = 3_500
 PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
 PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
@@ -350,6 +353,98 @@ def build_phase3_registry(
     def test_project(arguments: Mapping[str, Any]) -> str:
         del arguments
         return run_fixed([sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120)
+
+    def verify_code_change(arguments: Mapping[str, Any]) -> str:
+        del arguments
+        syntax = _verify_python_syntax()
+        lint = _verification_command(
+            [sys.executable, "-m", "ruff", "check", "--no-cache", "."], 60
+        )
+        tests = _verification_command(
+            [sys.executable, "-m", "pytest", "-p", "no:cacheprovider"], 120
+        )
+        statuses = {syntax["status"], lint["status"], tests["status"]}
+        if "fail" in statuses:
+            overall = "fail"
+        elif statuses == {"pass"}:
+            overall = "pass"
+        else:
+            overall = "incomplete"
+        return json.dumps(
+            {
+                "overall": overall,
+                "syntax": syntax,
+                "lint": lint,
+                "tests": tests,
+                "automatic_fixes_applied": False,
+            }
+        )
+
+    def _verify_python_syntax() -> dict[str, Any]:
+        candidates = sorted(boundary.root.rglob("*.py"))
+        checked = 0
+        skipped_large = 0
+        errors: list[dict[str, Any]] = []
+        truncated = False
+        for path in candidates:
+            relative = path.relative_to(boundary.root)
+            if (
+                not path.is_file()
+                or not boundary.contains(path)
+                or any(part in IGNORED_DIRECTORIES for part in relative.parts)
+            ):
+                continue
+            if checked >= MAX_VERIFY_PYTHON_FILES:
+                truncated = True
+                break
+            try:
+                if path.stat().st_size > MAX_TEXT_BYTES:
+                    skipped_large += 1
+                    continue
+                source = path.read_text(encoding="utf-8")
+                checked += 1
+                ast.parse(source, filename=relative.as_posix())
+            except (OSError, UnicodeDecodeError) as exc:
+                errors.append({"path": relative.as_posix(), "message": type(exc).__name__})
+            except SyntaxError as exc:
+                errors.append(
+                    {
+                        "path": relative.as_posix(),
+                        "line": exc.lineno,
+                        "offset": exc.offset,
+                        "message": exc.msg,
+                    }
+                )
+            if len(errors) >= MAX_VERIFY_SYNTAX_ERRORS:
+                truncated = True
+                break
+        if errors:
+            status = "fail"
+        elif truncated or skipped_large:
+            status = "incomplete"
+        else:
+            status = "pass"
+        return {
+            "status": status,
+            "files_checked": checked,
+            "skipped_large": skipped_large,
+            "errors": errors,
+            "truncated": truncated,
+        }
+
+    def _verification_command(command: list[str], timeout: int) -> dict[str, Any]:
+        try:
+            result = json.loads(run_fixed(command, timeout))
+        except ToolError as exc:
+            return {"status": "error", "error": str(exc)}
+        output = str(result.get("output", ""))
+        return {
+            "status": "pass" if int(result.get("exit_code", -1)) == 0 else "fail",
+            "exit_code": int(result.get("exit_code", -1)),
+            "output": output[:MAX_VERIFY_STEP_OUTPUT],
+            "truncated": bool(result.get("truncated"))
+            or len(output) > MAX_VERIFY_STEP_OUTPUT,
+        }
 
     def system_info(arguments: Mapping[str, Any]) -> str:
         del arguments
@@ -667,6 +762,18 @@ def build_phase3_registry(
             ),
             parameters={"type": "object", "properties": {}, "additionalProperties": False},
             handler=test_project,
+            permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="verify_code_change",
+            description=(
+                "Run bounded Python syntax parsing, fixed Ruff linting, and fixed pytest after "
+                "confirmation. Reports each result and never applies automatic fixes."
+            ),
+            parameters={"type": "object", "properties": {}, "additionalProperties": False},
+            handler=verify_code_change,
             permission=PermissionLevel.HIGH,
         )
     )

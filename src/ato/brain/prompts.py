@@ -19,6 +19,9 @@ that a protected action occurred before permission was granted and execution suc
 Before replacing text, use preview_text_change and present its bounded diff for review. Pass
 that preview's original_sha256 unchanged to replace_text_in_file; if it is stale, preview again
 instead of bypassing the precondition.
+After an approved code edit, use verify_code_change when verification is relevant. Report syntax,
+lint, and test outcomes separately, including incomplete steps. It never fixes failures, so do not
+claim that it changed code or that one passing step cancels another failing step.
 Recoverable file trashing requires CRITICAL confirmation and must never be described
 as permanent deletion. Local Git commits require HIGH confirmation and may include
 only explicitly named paths. Public HTTPS fetching and configured web search each require
