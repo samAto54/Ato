@@ -18,6 +18,7 @@ from ato.exceptions import ToolError
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
+from ato.tools.research import WebResearchCoordinator
 from ato.tools.search import WebSearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
@@ -95,6 +96,11 @@ def build_phase3_registry(
     boundary = WorkspaceBoundary(workspace_root)
     registry = ToolRegistry(permission_manager, audit_logger)
     approved_web_fetcher = web_fetcher or fetch_web_page
+    research_coordinator = (
+        WebResearchCoordinator(web_searcher, approved_web_fetcher)
+        if web_searcher is not None
+        else None
+    )
 
     def list_files(arguments: Mapping[str, Any]) -> str:
         directory = boundary.resolve(str(arguments.get("path", ".")))
@@ -642,6 +648,29 @@ def build_phase3_registry(
                     "additionalProperties": False,
                 },
                 handler=search_web,
+                permission=PermissionLevel.MEDIUM,
+            )
+        )
+        assert research_coordinator is not None
+        registry.register(
+            ToolSpec(
+                name="research_web",
+                description=(
+                    "Search and fetch up to three diversified public HTTPS sources after one "
+                    "confirmation. Returns bounded untrusted evidence and per-source failures."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 400},
+                        "max_sources": {"type": "integer", "minimum": 1, "maximum": 3},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
+                handler=lambda arguments: research_coordinator.research(
+                    str(arguments["query"]), int(arguments.get("max_sources", 3))
+                ),
                 permission=PermissionLevel.MEDIUM,
             )
         )
