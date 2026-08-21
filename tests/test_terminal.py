@@ -4,7 +4,7 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message, Role
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
-from ato.ui.terminal import run_terminal
+from ato.ui.terminal import HELP_TEXT, run_terminal
 
 
 class EchoLLM:
@@ -30,6 +30,18 @@ def test_terminal_conversation_and_exit() -> None:
         "Ato: Echo: Hello",
         "Goodbye.",
     ]
+
+
+def test_terminal_help_lists_commands_without_calling_the_model() -> None:
+    inputs = iter(["/help", "quit"])
+    output: list[str] = []
+
+    run_terminal(Agent(EchoLLM()), read=lambda prompt: next(inputs), write=output.append)
+
+    assert HELP_TEXT in output
+    assert "/voice <seconds>" in HELP_TEXT
+    assert "/speak-last" in HELP_TEXT
+    assert not any(line.startswith("Ato: Echo:") for line in output)
 
 
 def test_terminal_saves_successful_turns(tmp_path) -> None:
