@@ -19,6 +19,7 @@ from ato.providers import DeepSeekProvider
 from ato.research import SqliteResearchStore
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
+from ato.tools.github import GitHubReadClient
 from ato.tools.search import BraveSearchClient, TavilySearchClient
 
 EXIT_COMMANDS = {"exit", "quit"}
@@ -435,6 +436,11 @@ def main() -> None:
             ),
             research_store=research_store,
             checkpoint_store=checkpoint_store,
+            github_client=(
+                GitHubReadClient(settings.github_repository, settings.github_token)
+                if settings.github_repository
+                else None
+            ),
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")

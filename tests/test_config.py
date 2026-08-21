@@ -20,6 +20,8 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_EDIT_CHECKPOINT_FILE", "custom/checkpoints.db")
     monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-test-key")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-key")
+    monkeypatch.setenv("ATO_GITHUB_REPOSITORY", "sam/Ato")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-test-token")
     settings = Settings.from_env()
     assert settings.deepseek_api_key == "test-key"
     assert settings.model == "test-model"
@@ -36,6 +38,8 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert str(settings.edit_checkpoint_file) == "custom\\checkpoints.db"
     assert settings.brave_search_api_key == "brave-test-key"
     assert settings.tavily_api_key == "tavily-test-key"
+    assert settings.github_repository == "sam/Ato"
+    assert settings.github_token == "github-test-token"
 
 
 def test_settings_treat_brave_placeholder_as_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -64,4 +68,12 @@ def test_settings_validate_memory_limit(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_MEMORY_MAX_MESSAGES", "one hundred")
 
     with pytest.raises(ConfigurationError, match="must be an integer"):
+        Settings.from_env()
+
+
+def test_settings_validate_github_repository(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("ATO_GITHUB_REPOSITORY", "not a repository")
+
+    with pytest.raises(ConfigurationError, match="owner/name"):
         Settings.from_env()

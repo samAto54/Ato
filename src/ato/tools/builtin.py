@@ -22,6 +22,7 @@ from ato.exceptions import CheckpointStoreError, ToolError
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
+from ato.tools.github import MAX_GITHUB_ITEMS, GitHubReadClient
 from ato.tools.python_exec import validate_numeric_python
 from ato.tools.registry import ToolRegistry, ToolSpec
 from ato.tools.research import WebResearchCoordinator
@@ -106,6 +107,7 @@ def build_phase3_registry(
     web_searcher: WebSearchClient | None = None,
     research_store: SqliteResearchStore | None = None,
     checkpoint_store: SqliteEditCheckpointStore | None = None,
+    github_client: GitHubReadClient | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -441,6 +443,46 @@ def build_phase3_registry(
                 "ast_nodes": node_count,
                 "isolated_interpreter": True,
                 "os_sandbox": False,
+            }
+        )
+
+    def github_read(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        operation = str(arguments["operation"])
+        state = str(arguments.get("state", "open"))
+        limit = int(arguments.get("limit", 10))
+        path = arguments.get("path")
+        ref = arguments.get("ref")
+        if operation == "repository":
+            if any(value is not None for value in (path, ref)) or "state" in arguments:
+                raise ToolError("Repository metadata does not accept path, ref, or state.")
+            result: Any = github_client.repository_metadata()
+        elif operation == "issues":
+            if path is not None or ref is not None:
+                raise ToolError("Issue listing does not accept path or ref.")
+            result = github_client.list_issues(state, limit)
+        elif operation == "pull_requests":
+            if path is not None or ref is not None:
+                raise ToolError("Pull-request listing does not accept path or ref.")
+            result = github_client.list_pull_requests(state, limit)
+        elif operation == "commits":
+            if path is not None or ref is not None or "state" in arguments:
+                raise ToolError("Commit listing does not accept path, ref, or state.")
+            result = github_client.list_commits(limit)
+        elif operation == "file":
+            if not isinstance(path, str):
+                raise ToolError("GitHub file reading requires path.")
+            if "state" in arguments or "limit" in arguments:
+                raise ToolError("GitHub file reading does not accept state or limit.")
+            result = github_client.read_file(path, None if ref is None else str(ref))
+        else:
+            raise ToolError("The requested GitHub operation is not allowlisted.")
+        return json.dumps(
+            {
+                "repository": github_client.repository,
+                "operation": operation,
+                "untrusted_external": True,
+                "result": result,
             }
         )
 
@@ -905,6 +947,37 @@ def build_phase3_registry(
             permission=PermissionLevel.LOW,
         )
     )
+    if github_client is not None:
+        registry.register(
+            ToolSpec(
+                name="github_read",
+                description=(
+                    "Read bounded metadata, issues, pull requests, commits, or one UTF-8 file "
+                    "from the single configured GitHub repository. Never mutates GitHub."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["repository", "issues", "pull_requests", "commits", "file"],
+                        },
+                        "state": {"type": "string", "enum": ["open", "closed", "all"]},
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": MAX_GITHUB_ITEMS,
+                        },
+                        "path": {"type": "string", "minLength": 1, "maxLength": 500},
+                        "ref": {"type": "string", "minLength": 1, "maxLength": 200},
+                    },
+                    "required": ["operation"],
+                    "additionalProperties": False,
+                },
+                handler=github_read,
+                permission=PermissionLevel.MEDIUM,
+            )
+        )
     registry.register(
         ToolSpec(
             name="preview_text_change_set",

@@ -36,6 +36,7 @@ The current Phase 9 build provides:
 - Guarded change sets for up to five files with one combined preview and confirmation
 - HIGH-confirmation execution of four fixed, no-shell development command profiles
 - CRITICAL-confirmation numeric-only Python execution with conservative syntax validation
+- Confirmed read-only GitHub access for one configured repository
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -142,11 +143,22 @@ ATO_LONG_TERM_MEMORY_FILE=data/long_term_memory.db
 ATO_KNOWLEDGE_FILE=data/knowledge.db
 ATO_RESEARCH_FILE=data/research.db
 ATO_EDIT_CHECKPOINT_FILE=data/edit_checkpoints.db
+ATO_GITHUB_REPOSITORY=owner/repository
+GITHUB_TOKEN=your_github_token_here
 ATO_WORKSPACE_ROOT=.
 ATO_AUDIT_FILE=data/audit.jsonl
 ```
 
 Never commit `.env`; it is excluded by `.gitignore`.
+
+`ATO_GITHUB_REPOSITORY` is optional and uses `owner/repository` format. When configured,
+`github_read` can retrieve bounded repository metadata, issues, pull requests, commits, and one
+UTF-8 file after `MEDIUM` confirmation. `GITHUB_TOKEN` is optional for public repositories and may
+be needed for private repositories or higher API limits. It is read only from the environment and
+is never returned in tool results. Requests use the fixed `https://api.github.com` host, a
+15-second timeout, a 1 MB response limit, list limits of 20, and a 100 KB file limit. This phase
+cannot create issues, comment, edit files, merge pull requests, or push commits. All GitHub content
+is labelled untrusted external data.
 
 ## Run Ato
 
