@@ -1,8 +1,14 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from ato.brain.messages import Message, Role
-from ato.providers.deepseek import DeepSeekProvider
+from ato.providers.deepseek import (
+    MAX_TOOL_EVIDENCE_CHARS,
+    MAX_TOOL_RESULT_CHARS,
+    DeepSeekProvider,
+    _bounded_tool_result,
+)
 
 
 def test_provider_maps_messages_to_deepseek_chat_api() -> None:
@@ -101,7 +107,7 @@ def test_provider_streaming_reassembles_and_executes_tool_calls() -> None:
             name="echo_value",
             description="Echo.",
             parameters={"type": "object", "properties": {"value": {"type": "string"}}},
-            handler=lambda arguments: str(arguments["value"]),
+            handler=lambda arguments: str(arguments["value"]) * 20_000,
         )
     )
     tool_chunks = [
@@ -150,4 +156,25 @@ def test_provider_streaming_reassembles_and_executes_tool_calls() -> None:
     )
 
     assert list(provider.stream([Message(Role.USER, "Use tool")], registry)) == ["Safe."]
-    assert create.call_args_list[1].kwargs["messages"][-1]["content"] == "safe"
+    bounded = create.call_args_list[1].kwargs["messages"][-1]["content"]
+    envelope = json.loads(bounded)
+    assert envelope["ato_tool_result_truncated"] is True
+    assert envelope["original_characters"] == 80_000
+    assert len(bounded) == MAX_TOOL_RESULT_CHARS
+
+
+def test_tool_result_budget_is_per_result_and_cumulative() -> None:
+    remaining = MAX_TOOL_EVIDENCE_CHARS
+    bounded_results = []
+    for _ in range(3):
+        bounded = _bounded_tool_result("x" * 20_000, remaining)
+        bounded_results.append(bounded)
+        remaining -= len(bounded)
+
+    assert [len(result) for result in bounded_results] == [12_000, 12_000, 6_000]
+    assert sum(map(len, bounded_results)) == MAX_TOOL_EVIDENCE_CHARS
+    assert all(json.loads(result)["ato_tool_result_truncated"] for result in bounded_results)
+
+
+def test_small_tool_results_remain_unchanged() -> None:
+    assert _bounded_tool_result("safe", MAX_TOOL_EVIDENCE_CHARS) == "safe"
