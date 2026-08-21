@@ -23,7 +23,7 @@ from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
 from ato.tools.github import GitHubClient
 from ato.tools.search import BraveSearchClient, TavilySearchClient
-from ato.voice import WindowsSpeechPlayer
+from ato.voice import SoundDeviceRecorder, WindowsSpeechPlayer
 
 EXIT_COMMANDS = {"exit", "quit"}
 CLEAR_MEMORY_COMMAND = "/clear-memory"
@@ -449,6 +449,11 @@ def main() -> None:
             application_launcher=WindowsApplicationLauncher(),
             process_monitor=WindowsProcessMonitor(),
             speech_player=WindowsSpeechPlayer() if settings.voice_enabled else None,
+            microphone_recorder=(
+                SoundDeviceRecorder(settings.workspace_root / "data" / "audio")
+                if settings.voice_enabled
+                else None
+            ),
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")

@@ -46,6 +46,7 @@ The current Phase 9 build provides:
 - Confirmed privacy-reduced process listings and exact-PID snapshot checks
 - Provider-neutral speech recognition and synthesis contracts with bounded payloads
 - Optional confirmed offline Windows text-to-speech playback
+- Optional CRITICAL-confirmation one-shot microphone recording without background listening
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -131,6 +132,8 @@ Install Ato with its development tools:
 ```powershell
 python -m pip install -e ".[dev]"
 ```
+
+Optional microphone support requires `python -m pip install -e ".[voice]"`.
 
 Copy the safe environment template:
 
