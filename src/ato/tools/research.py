@@ -97,6 +97,16 @@ class WebResearchCoordinator:
                 failures.append({"source_url": url, "error": str(exc)[:MAX_FAILURE_CHARS]})
 
         evidence_map = _build_evidence_map(str(search_payload.get("query", query)), sources)
+        disagreements = _find_numeric_disagreements(evidence_map)
+        report_assessment = _build_report_assessment(
+            sources=sources,
+            evidence=evidence_map,
+            failures=failures,
+            disagreements=disagreements,
+            searched_results=len(raw_results),
+            selected_results=len(candidates),
+            requested_sources=max_sources,
+        )
 
         return json.dumps(
             {
@@ -105,7 +115,8 @@ class WebResearchCoordinator:
                 "content_trust": "untrusted_external",
                 "sources": sources,
                 "evidence_map": evidence_map,
-                "potential_disagreements": _find_numeric_disagreements(evidence_map),
+                "potential_disagreements": disagreements,
+                "report_assessment": report_assessment,
                 "analysis_notice": (
                     "Passage matching is lexical. Numeric disagreement hints require review "
                     "and do not by themselves prove a contradiction."
@@ -237,3 +248,64 @@ def _terms(value: str) -> tuple[str, ...]:
     return tuple(
         term for term in WORD_PATTERN.findall(value.casefold()) if term not in STOP_WORDS
     )
+
+
+def _build_report_assessment(
+    *,
+    sources: list[dict[str, Any]],
+    evidence: list[dict[str, Any]],
+    failures: list[dict[str, str]],
+    disagreements: list[dict[str, Any]],
+    searched_results: int,
+    selected_results: int,
+    requested_sources: int,
+) -> dict[str, Any]:
+    independent_hosts = {
+        urlsplit(str(source["source_url"])).hostname for source in sources
+    } - {None}
+    evidence_source_ids = {str(item["source_id"]) for item in evidence}
+    sources_without_evidence = [
+        str(source["source_id"])
+        for source in sources
+        if str(source["source_id"]) not in evidence_source_ids
+    ]
+    if not evidence:
+        coverage = "none"
+    elif len(independent_hosts) >= 2 and len(evidence_source_ids) >= 2:
+        coverage = "multi_source"
+    else:
+        coverage = "limited"
+
+    uncertainty_flags = []
+    if failures:
+        uncertainty_flags.append("source_fetch_failures")
+    if disagreements:
+        uncertainty_flags.append("potential_numeric_disagreement")
+    if any(bool(source["text_truncated"]) for source in sources):
+        uncertainty_flags.append("truncated_source_text")
+    if sources and len(independent_hosts) < 2:
+        uncertainty_flags.append("single_independent_host")
+    if sources_without_evidence:
+        uncertainty_flags.append("sources_without_query_relevant_passages")
+    if not evidence:
+        uncertainty_flags.append("no_query_relevant_passages")
+
+    return {
+        "coverage": coverage,
+        "successful_sources": len(sources),
+        "independent_hosts": len(independent_hosts),
+        "evidence_passages": len(evidence),
+        "supported_evidence_ids": [str(item["evidence_id"]) for item in evidence],
+        "uncertainty_flags": uncertainty_flags,
+        "source_gaps": {
+            "requested_sources": requested_sources,
+            "searched_results": searched_results,
+            "selected_results": selected_results,
+            "failed_urls": [failure["source_url"] for failure in failures],
+            "sources_without_evidence": sources_without_evidence,
+        },
+        "inference_boundary": (
+            "Only statements directly grounded in listed evidence IDs are source-supported. "
+            "Any synthesis beyond those passages must be labelled as inference."
+        ),
+    }
