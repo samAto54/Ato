@@ -35,6 +35,7 @@ The current Phase 9 build provides:
 - Recoverable, one-time text-edit checkpoints with SHA-256-guarded rollback
 - Guarded change sets for up to five files with one combined preview and confirmation
 - HIGH-confirmation execution of four fixed, no-shell development command profiles
+- CRITICAL-confirmation numeric-only Python execution with conservative syntax validation
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -357,6 +358,14 @@ Inspection tools are deliberately read-only:
   pytest may receive one existing workspace path, while version profiles accept no target. Each
   profile has a fixed timeout, captures and caps output, runs with `shell=False`, and reports its
   exit code and truncation state. This is a bounded profile runner, not general terminal access.
+- `execute_python_calculation` runs small numeric-only programs after `CRITICAL` confirmation.
+  Before launch, Ato limits source and AST size and rejects imports, attributes, private names,
+  containers, loops, comprehensions, function/class definitions, and non-approved calls. Only
+  arithmetic, comparisons, single-name assignments, and `abs`, `min`, `max`, `round`, and `print`
+  are accepted, with bounded integer literals and powers. The process uses Python `-I -S`, a new
+  temporary working directory, a three-second timeout, a minimal environment, `shell=False`, and
+  separate 10,000-character stdout/stderr caps. Results explicitly report `os_sandbox: false`:
+  these controls are defense in depth and do not constitute an operating-system sandbox.
 
 The first editing tools are deliberately narrow:
 

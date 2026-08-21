@@ -22,6 +22,7 @@ from ato.exceptions import CheckpointStoreError, ToolError
 from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
+from ato.tools.python_exec import validate_numeric_python
 from ato.tools.registry import ToolRegistry, ToolSpec
 from ato.tools.research import WebResearchCoordinator
 from ato.tools.search import WebSearchClient
@@ -42,6 +43,8 @@ MAX_VERIFY_PYTHON_FILES = 500
 MAX_VERIFY_SYNTAX_ERRORS = 20
 MAX_VERIFY_STEP_OUTPUT = 3_500
 MAX_CHANGE_SET_FILES = 5
+MAX_PYTHON_EXEC_OUTPUT = 10_000
+PYTHON_EXEC_TIMEOUT_SECONDS = 3
 PROTECTED_WRITE_DIRECTORIES = {".git", ".github", ".venv", "__pycache__", "data"}
 PROTECTED_WRITE_SUFFIXES = {".key", ".pem", ".p12", ".pfx"}
 
@@ -400,6 +403,46 @@ def build_phase3_registry(
         result["command"] = command_id
         result["timeout_seconds"] = timeout
         return json.dumps(result)
+
+    def execute_python_calculation(arguments: Mapping[str, Any]) -> str:
+        source = str(arguments["code"])
+        node_count = validate_numeric_python(source)
+        environment = {
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        }
+        try:
+            with tempfile.TemporaryDirectory(prefix="ato-python-") as temporary_directory:
+                result = subprocess.run(
+                    [sys.executable, "-I", "-S", "-c", source],
+                    cwd=temporary_directory,
+                    capture_output=True,
+                    text=True,
+                    timeout=PYTHON_EXEC_TIMEOUT_SECONDS,
+                    check=False,
+                    env=environment,
+                    shell=False,
+                )
+        except subprocess.TimeoutExpired as exc:
+            raise ToolError(
+                f"Python calculation exceeded its {PYTHON_EXEC_TIMEOUT_SECONDS}-second timeout."
+            ) from exc
+        except OSError as exc:
+            raise ToolError("The isolated Python interpreter could not be started.") from exc
+        stdout = result.stdout[:MAX_PYTHON_EXEC_OUTPUT]
+        stderr = result.stderr[:MAX_PYTHON_EXEC_OUTPUT]
+        return json.dumps(
+            {
+                "exit_code": result.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+                "stdout_truncated": len(result.stdout) > MAX_PYTHON_EXEC_OUTPUT,
+                "stderr_truncated": len(result.stderr) > MAX_PYTHON_EXEC_OUTPUT,
+                "ast_nodes": node_count,
+                "isolated_interpreter": True,
+                "os_sandbox": False,
+            }
+        )
 
     def verify_code_change(arguments: Mapping[str, Any]) -> str:
         del arguments
@@ -1164,6 +1207,30 @@ def build_phase3_registry(
             },
             handler=run_allowed_command,
             permission=PermissionLevel.HIGH,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="execute_python_calculation",
+            description=(
+                "Execute validated numeric-only Python in isolated interpreter mode and a "
+                "temporary directory. Imports, attributes, containers, loops, and file, "
+                "network, or process access are rejected. This is not an OS sandbox."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 3_000,
+                    }
+                },
+                "required": ["code"],
+                "additionalProperties": False,
+            },
+            handler=execute_python_calculation,
+            permission=PermissionLevel.CRITICAL,
         )
     )
     registry.register(

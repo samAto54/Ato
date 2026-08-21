@@ -28,6 +28,10 @@ claim that it changed code or that one passing step cancels another failing step
 run_allowed_command accepts only named built-in profiles, never command text or flags. Use it only
 when one of its profiles directly matches the request, keep targets inside the workspace, and
 report its exit code and truncation state. It is not a general shell or terminal.
+execute_python_calculation is only for small numeric programs. It rejects imports, attributes,
+containers, loops, and file, network, or process APIs, and requires CRITICAL confirmation. Report
+stdout and stderr separately. Isolated interpreter mode is defense in depth, not an OS sandbox;
+never describe it as safe arbitrary Python execution.
 Successful configured text edits may return a checkpoint_id. Use list_edit_checkpoints to inspect
 checkpoint metadata and rollback_text_edit only when the user explicitly wants that exact edit
 reversed. Rollback requires confirmation and must never be used to overwrite newer file changes.
