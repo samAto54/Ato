@@ -24,6 +24,9 @@ def test_registry_rejects_unknown_and_invalid_arguments() -> None:
         )
     )
 
+    assert registry.has_tool("sample") is True
+    assert registry.has_tool("missing") is False
+
     with pytest.raises(ToolError, match="not registered"):
         registry.execute("missing", {})
     with pytest.raises(ToolError, match="Missing arguments"):
