@@ -15,6 +15,9 @@ from ato.tools.registry import ToolRegistry
 
 MAX_STRUCTURED_OUTPUT_CHARS = 100_000
 STRUCTURED_OUTPUT_MAX_TOKENS = 4_096
+MAX_TOOL_RESULT_CHARS = 12_000
+MAX_TOOL_EVIDENCE_CHARS = 30_000
+
 
 class DeepSeekProvider:
     """Generate Ato responses through DeepSeek's OpenAI-compatible API."""
@@ -40,6 +43,7 @@ class DeepSeekProvider:
         )
 
         tool_rounds = 0
+        tool_evidence_chars = 0
         while True:
             response = self._create_completion(conversation, tools)
             message = response.choices[0].message
@@ -79,6 +83,10 @@ class DeepSeekProvider:
                     call.function.arguments,
                     user_request,
                 )
+                result = _bounded_tool_result(
+                    result, MAX_TOOL_EVIDENCE_CHARS - tool_evidence_chars
+                )
+                tool_evidence_chars += len(result)
                 conversation.append({"role": "tool", "tool_call_id": call.id, "content": result})
 
     def stream(
@@ -95,6 +103,7 @@ class DeepSeekProvider:
             None,
         )
         tool_rounds = 0
+        tool_evidence_chars = 0
 
         while True:
             calls: dict[int, dict[str, Any]] = {}
@@ -141,6 +150,10 @@ class DeepSeekProvider:
                 result = self._execute_tool_call(
                     tools, function["name"], function["arguments"], user_request
                 )
+                result = _bounded_tool_result(
+                    result, MAX_TOOL_EVIDENCE_CHARS - tool_evidence_chars
+                )
+                tool_evidence_chars += len(result)
                 conversation.append({"role": "tool", "tool_call_id": call["id"], "content": result})
 
     def generate_structured(
@@ -234,3 +247,33 @@ class DeepSeekProvider:
             return registry.execute(name, arguments, user_request=user_request)
         except (json.JSONDecodeError, ToolError) as exc:
             return f"Tool error: {exc}"
+
+
+def _bounded_tool_result(result: str, remaining_chars: int) -> str:
+    """Bound one provider-facing tool result while retaining valid JSON metadata."""
+    allowed = min(MAX_TOOL_RESULT_CHARS, max(0, remaining_chars))
+    if len(result) <= allowed:
+        return result
+    if allowed < 200:
+        return "[tool evidence budget exhausted]"[:allowed]
+
+    def envelope(content_chars: int) -> str:
+        return json.dumps(
+            {
+                "ato_tool_result_truncated": True,
+                "original_characters": len(result),
+                "content": result[:content_chars],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    low = 0
+    high = min(len(result), allowed)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(envelope(middle)) <= allowed:
+            low = middle
+        else:
+            high = middle - 1
+    return envelope(low)

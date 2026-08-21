@@ -32,6 +32,7 @@ The current Phase 5 build provides:
 - Read-only local branch inspection and HIGH-confirmation path-scoped Git commits
 - Privacy-conscious read-only OS, CPU, RAM, Python, and workspace-disk information
 - Workspace path boundaries and a maximum tool-call limit
+- Provider-loop tool evidence capped per result and cumulatively with truncation metadata
 - LOW/MEDIUM/HIGH/CRITICAL permission levels with fail-closed confirmation
 - Redacted append-only JSONL audit logging for every tool execution decision
 - A provider-neutral `LLMClient` interface
@@ -250,6 +251,11 @@ The terminal streams DeepSeek text fragments as they arrive. Tool-call fragments
 reassembled and validated before execution, and tool results remain subject to the
 same permissions and audit controls. A conversation turn is persisted only after the
 entire stream completes successfully; partial or failed streams do not enter memory.
+Provider-facing tool output is limited to 12,000 characters per result and 30,000 characters
+across one response cycle. Oversized results are wrapped in valid JSON with explicit truncation
+metadata; once the cumulative budget is exhausted, later evidence is omitted. These limits
+apply equally to streaming and non-streaming tool loops and prevent multi-page research from
+bypassing normal conversation context controls.
 
 DeepSeek JSON mode is available through `StructuredOutputSpec` and
 `DeepSeekProvider.generate_structured`. Ato adds an explicit JSON-schema instruction,
