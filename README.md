@@ -289,7 +289,11 @@ The window provides persisted text chat, recent-history restoration, subsystem n
 status indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
 Model requests run off the Tk event loop so the window remains responsive. This first GUI increment is
 deliberately chat-only: tool execution and permission prompts remain locked in the desktop shell until a
-thread-safe confirmation bridge is added. Use the terminal `ato` command for the full tool system.
+thread-safe confirmation bridge is added. A visible header badge communicates this state, and the
+desktop-specific system policy prohibits claims that unavailable browsing, filesystem, command, or
+other tool actions were performed. Use the terminal `ato` command for the full tool system. The
+bottom composer is reserved before the expanding transcript so input controls remain visible at
+supported window sizes.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
