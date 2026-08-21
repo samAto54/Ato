@@ -4,7 +4,8 @@ import pytest
 
 from ato.brain.agent import Agent
 from ato.brain.messages import Message
-from ato.memory import JsonMemoryStore
+from ato.knowledge import SqliteKnowledgeStore
+from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController
 
 
@@ -34,3 +35,21 @@ def test_desktop_policy_forbids_claims_of_unavailable_tool_use() -> None:
     assert "provides no tools" in policy
     assert "Never claim that you performed an unavailable action" in policy
     assert "browse or fetch web pages" in policy
+
+
+def test_desktop_controller_exposes_bounded_read_only_sidebar_snapshots(tmp_path) -> None:
+    memory = SqliteLongTermMemory(tmp_path / "memory.db")
+    memory.remember("Use cyan for the Ato HUD.", "preference")
+    (tmp_path / "guide.md").write_text("Ato guide", encoding="utf-8")
+    knowledge = SqliteKnowledgeStore(tmp_path / "knowledge.db", tmp_path)
+    knowledge.ingest("guide.md")
+    controller = DesktopChatController(
+        Agent(EchoLLM()),
+        long_term_memory=memory,
+        knowledge_store=knowledge,
+    )
+
+    assert controller.memory_snapshot() == (
+        "#1  PREFERENCE  ACTIVE\nUse cyan for the Ato HUD.",
+    )
+    assert controller.knowledge_snapshot() == ("#1  guide.md\n1 indexed chunks",)
