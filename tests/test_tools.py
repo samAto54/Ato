@@ -189,6 +189,82 @@ def test_fixed_analysis_commands_and_permissions(
         denied.execute("test_project", {})
 
 
+def test_verify_code_change_reports_all_steps_without_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    valid = tmp_path / "valid.py"
+    invalid = tmp_path / "invalid.py"
+    valid.write_text("value = 1\n", encoding="utf-8")
+    invalid.write_text("def broken(:\n", encoding="utf-8")
+    original = {path: path.read_bytes() for path in (valid, invalid)}
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        assert kwargs["env"]["PYTHONDONTWRITEBYTECODE"] == "1"  # type: ignore[index]
+        if "ruff" in command:
+            return subprocess.CompletedProcess(command, 1, "lint failure " + "x" * 5_000, "")
+        return subprocess.CompletedProcess(command, 0, "tests passed", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    registry = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+
+    result = json.loads(registry.execute("verify_code_change", {}))
+
+    assert result["overall"] == "fail"
+    assert result["syntax"]["status"] == "fail"
+    assert result["syntax"]["errors"][0]["path"] == "invalid.py"
+    assert result["lint"]["status"] == "fail"
+    assert len(result["lint"]["output"]) == 3_500
+    assert result["lint"]["truncated"] is True
+    assert result["tests"]["status"] == "pass"
+    assert result["automatic_fixes_applied"] is False
+    assert calls[0][-5:] == ["-m", "ruff", "check", "--no-cache", "."]
+    assert calls[1][-4:] == ["-m", "pytest", "-p", "no:cacheprovider"]
+    assert {path: path.read_bytes() for path in (valid, invalid)} == original
+
+
+def test_verify_code_change_requires_permission_before_any_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("verification command should not execute"),
+    )
+    registry = build_phase3_registry(tmp_path)
+
+    with pytest.raises(ToolError, match="Permission denied"):
+        registry.execute("verify_code_change", {})
+
+
+def test_verify_code_change_preserves_later_results_after_command_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "valid.py").write_text("value = 1\n", encoding="utf-8")
+    calls = 0
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        nonlocal calls
+        del kwargs
+        calls += 1
+        if calls == 1:
+            raise subprocess.TimeoutExpired(command, 60)
+        return subprocess.CompletedProcess(command, 0, "tests passed", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    registry = build_phase3_registry(tmp_path, PermissionManager(lambda request: True))
+
+    result = json.loads(registry.execute("verify_code_change", {}))
+
+    assert result["overall"] == "incomplete"
+    assert result["syntax"]["status"] == "pass"
+    assert result["lint"]["status"] == "error"
+    assert "timeout" in result["lint"]["error"]
+    assert result["tests"]["status"] == "pass"
+    assert calls == 2
+
+
 def test_controlled_text_writes_require_permission_and_never_overwrite(tmp_path: Path) -> None:
     denied = build_phase3_registry(tmp_path)
     with pytest.raises(ToolError, match="Permission denied"):
