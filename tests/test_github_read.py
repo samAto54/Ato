@@ -7,7 +7,7 @@ import pytest
 from ato.exceptions import ToolError
 from ato.security.permissions import PermissionManager
 from ato.tools import build_phase3_registry
-from ato.tools.github import GitHubReadClient
+from ato.tools.github import GitHubClient
 
 
 class FakeRequester:
@@ -35,7 +35,7 @@ def test_repository_metadata_uses_fixed_host_and_token_header() -> None:
             }
         ]
     )
-    client = GitHubReadClient("sam/Ato", "secret-token", requester)
+    client = GitHubClient("sam/Ato", "secret-token", requester)
 
     result = client.repository_metadata()
 
@@ -56,7 +56,7 @@ def test_issue_and_pull_request_lists_are_bounded_and_separate() -> None:
             [{"number": 3, "title": "Change", "state": "open", "draft": False}],
         ]
     )
-    client = GitHubReadClient("sam/Ato", requester=requester)
+    client = GitHubClient("sam/Ato", requester=requester)
 
     issues = client.list_issues("open", 5)
     pulls = client.list_pull_requests("all", 5)
@@ -80,7 +80,7 @@ def test_file_read_decodes_bounded_utf8_and_encodes_path_and_ref() -> None:
             }
         ]
     )
-    client = GitHubReadClient("sam/Ato", requester=requester)
+    client = GitHubClient("sam/Ato", requester=requester)
 
     result = client.read_file("docs/my file.md", "feature/test")
 
@@ -91,7 +91,7 @@ def test_file_read_decodes_bounded_utf8_and_encodes_path_and_ref() -> None:
 
 
 def test_github_tool_requires_permission_and_rejects_operation_field_mixing(tmp_path) -> None:
-    client = GitHubReadClient("sam/Ato", requester=FakeRequester([]))
+    client = GitHubClient("sam/Ato", requester=FakeRequester([]))
     denied = build_phase3_registry(tmp_path, github_client=client)
     with pytest.raises(ToolError, match="Permission denied"):
         denied.execute("github_read", {"operation": "repository"})
@@ -108,17 +108,17 @@ def test_github_tool_requires_permission_and_rejects_operation_field_mixing(tmp_
 @pytest.mark.parametrize("repository", ["missing-slash", "a/b/c", "../owner/repo", "a b/repo"])
 def test_repository_name_is_strictly_validated(repository) -> None:
     with pytest.raises(ValueError, match="owner/name"):
-        GitHubReadClient(repository)
+        GitHubClient(repository)
 
 
 def test_github_file_rejects_traversal_and_binary_content() -> None:
-    client = GitHubReadClient("sam/Ato", requester=FakeRequester([]))
+    client = GitHubClient("sam/Ato", requester=FakeRequester([]))
     with pytest.raises(ToolError, match="normalized"):
         client.read_file("../secret")
 
     binary = FakeRequester(
         [{"type": "file", "encoding": "base64", "content": base64.b64encode(b"\xff").decode()}]
     )
-    client = GitHubReadClient("sam/Ato", requester=binary)
+    client = GitHubClient("sam/Ato", requester=binary)
     with pytest.raises(ToolError, match="UTF-8"):
         client.read_file("asset.bin")
