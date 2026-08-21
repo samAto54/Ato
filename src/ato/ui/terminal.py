@@ -22,6 +22,7 @@ from ato.research import SqliteResearchStore
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
 from ato.tools.github import GitHubClient
+from ato.tools.registry import ToolRegistry
 from ato.tools.search import BraveSearchClient, TavilySearchClient
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
@@ -39,6 +40,7 @@ CLEAR_EXPIRATION_PREFIX = "/clear-memory-expiration "
 INGEST_PREFIX = "/ingest "
 LIST_KNOWLEDGE_COMMAND = "/knowledge"
 REMOVE_DOCUMENT_PREFIX = "/remove-document "
+VOICE_PREFIX = "/voice "
 
 
 def confirm_tool(request: PermissionRequest) -> bool:
@@ -60,6 +62,7 @@ def run_terminal(
     read: Callable[[str], str] = input,
     write: Callable[[str], None] = print,
     write_chunk: Callable[[str], None] | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> None:
     """Run the interactive terminal loop for an existing agent."""
     write(
@@ -77,6 +80,46 @@ def run_terminal(
         if user_input.lower() in EXIT_COMMANDS:
             write("Goodbye.")
             return
+        if user_input.lower().startswith(VOICE_PREFIX):
+            if tool_registry is None:
+                write("Ato error: Voice tools are unavailable.")
+                continue
+            try:
+                duration = int(user_input[len(VOICE_PREFIX) :].strip())
+                recording = json.loads(
+                    tool_registry.execute(
+                        "record_microphone",
+                        {"duration_seconds": duration},
+                        user_request=user_input,
+                    )
+                )
+                transcription = json.loads(
+                    tool_registry.execute(
+                        "transcribe_audio",
+                        {"path": recording["path"]},
+                        user_request=user_input,
+                    )
+                )
+                transcript = str(transcription["transcript"]).strip()
+            except (AtoError, ValueError, KeyError) as exc:
+                write(f"Ato error: {exc}")
+                continue
+            write(f"Ato transcript (review before submitting): {transcript}")
+            approval = read("Submit this transcript to Ato? [y/N]: ").strip().lower()
+            if approval not in {"y", "yes"}:
+                write("Ato: Voice turn cancelled; transcript was not submitted.")
+                continue
+            _deliver_agent_turn(
+                agent,
+                transcript,
+                memory_store=memory_store,
+                write=write,
+                write_chunk=write_chunk,
+            )
+            continue
+        if user_input.lower() == VOICE_PREFIX.strip():
+            write("Ato error: Use /voice followed by a duration from 1 to 120 seconds.")
+            continue
         if user_input.lower() == CLEAR_MEMORY_COMMAND:
             try:
                 if memory_store is not None:
@@ -335,37 +378,52 @@ def run_terminal(
         if not user_input:
             continue
 
-        streaming_started = False
-        emit = write_chunk or _write_terminal_chunk
-        try:
-            if agent.can_stream:
-                chunks = agent.respond_stream(user_input)
-                first = next(chunks)
-                streaming_started = True
-                emit("Ato: ")
-                emit(first)
-                for chunk in chunks:
-                    emit(chunk)
-                emit("\n")
-            else:
-                reply = agent.respond(user_input)
-                write(f"Ato: {reply}")
-            if memory_store is not None:
-                memory_store.save_context(agent.conversation, agent.summary)
-        except StopIteration:
-            write("Ato error: The language model returned an empty response.")
-            continue
-        except AtoError as exc:
-            if streaming_started:
-                emit("\n")
-            write(f"Ato error: {exc}")
-            continue
+        _deliver_agent_turn(
+            agent,
+            user_input,
+            memory_store=memory_store,
+            write=write,
+            write_chunk=write_chunk,
+        )
 
 
 def _write_terminal_chunk(text: str) -> None:
     """Write one response fragment without inserting extra line breaks."""
     sys.stdout.write(text)
     sys.stdout.flush()
+
+
+def _deliver_agent_turn(
+    agent: Agent,
+    user_input: str,
+    *,
+    memory_store: JsonMemoryStore | None,
+    write: Callable[[str], None],
+    write_chunk: Callable[[str], None] | None,
+) -> None:
+    """Submit reviewed text directly to the agent, bypassing terminal command parsing."""
+    streaming_started = False
+    emit = write_chunk or _write_terminal_chunk
+    try:
+        if agent.can_stream:
+            chunks = agent.respond_stream(user_input)
+            first = next(chunks)
+            streaming_started = True
+            emit("Ato: ")
+            emit(first)
+            for chunk in chunks:
+                emit(chunk)
+            emit("\n")
+        else:
+            write(f"Ato: {agent.respond(user_input)}")
+        if memory_store is not None:
+            memory_store.save_context(agent.conversation, agent.summary)
+    except StopIteration:
+        write("Ato error: The language model returned an empty response.")
+    except AtoError as exc:
+        if streaming_started:
+            emit("\n")
+        write(f"Ato error: {exc}")
 
 
 def _parse_memory_content(value: str) -> tuple[str, MemoryCategory | None]:
@@ -481,4 +539,5 @@ def main() -> None:
         memory_store=memory_store,
         long_term_memory=long_term_memory,
         knowledge_store=knowledge_store,
+        tool_registry=tool_registry,
     )
