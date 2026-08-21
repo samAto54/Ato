@@ -26,6 +26,8 @@ MAX_GITHUB_ISSUE_TITLE_CHARS = 200
 MAX_GITHUB_ISSUE_BODY_CHARS = 10_000
 MAX_GITHUB_ISSUE_LABELS = 10
 MAX_GITHUB_COMMENT_CHARS = 10_000
+MAX_GITHUB_PULL_TITLE_CHARS = 200
+MAX_GITHUB_PULL_BODY_CHARS = 10_000
 
 
 class GitHubClient:
@@ -44,6 +46,7 @@ class GitHubClient:
         self._requester = requester or _request_bytes
         self._submitted_issue_fingerprints: set[str] = set()
         self._submitted_comment_fingerprints: set[str] = set()
+        self._submitted_pull_fingerprints: set[str] = set()
 
     @property
     def can_write(self) -> bool:
@@ -210,6 +213,67 @@ class GitHubClient:
             "comment_sha256": fingerprint,
         }
 
+    def preview_pull_request(
+        self, base: str, head: str, title: str, body: str, draft: bool
+    ) -> dict[str, Any]:
+        base, head, title, body = _validate_pull_request(base, head, title, body)
+        fingerprint = _pull_fingerprint(self.repository, base, head, title, body, draft)
+        return {
+            "repository": self.repository,
+            "base": base,
+            "head": head,
+            "title": title,
+            "body": body,
+            "draft": draft,
+            "pull_request_sha256": fingerprint,
+        }
+
+    def create_pull_request(
+        self,
+        base: str,
+        head: str,
+        title: str,
+        body: str,
+        draft: bool,
+        expected_repository: str,
+        expected_sha256: str,
+    ) -> dict[str, Any]:
+        if not self._token:
+            raise ToolError("GitHub pull-request creation requires GITHUB_TOKEN.")
+        preview = self.preview_pull_request(base, head, title, body, draft)
+        if expected_repository != self.repository:
+            raise ToolError("Configured GitHub repository differs from the reviewed repository.")
+        if not re.fullmatch(r"[a-fA-F0-9]{64}", expected_sha256):
+            raise ToolError("expected_sha256 must be a 64-character SHA-256 digest.")
+        fingerprint = preview["pull_request_sha256"]
+        if expected_sha256.casefold() != fingerprint:
+            raise ToolError("GitHub pull request differs from the reviewed preview.")
+        if fingerprint in self._submitted_pull_fingerprints:
+            raise ToolError("This exact pull request was already submitted during this session.")
+        payload = self._request(
+            f"/repos/{self.repository}/pulls",
+            method="POST",
+            body={
+                "base": preview["base"],
+                "head": preview["head"],
+                "title": preview["title"],
+                "body": preview["body"],
+                "draft": preview["draft"],
+            },
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("number"), int):
+            raise ToolError("GitHub returned an unexpected pull-request response.")
+        self._submitted_pull_fingerprints.add(fingerprint)
+        return {
+            "number": payload["number"],
+            "title": payload.get("title"),
+            "state": payload.get("state"),
+            "draft": payload.get("draft"),
+            "html_url": payload.get("html_url"),
+            "repository": self.repository,
+            "pull_request_sha256": fingerprint,
+        }
+
     def _get(self, path: str, query: dict[str, str] | None = None) -> Any:
         return self._request(path, query=query)
 
@@ -285,6 +349,54 @@ def _validate_comment(issue_number: int, body: str) -> str:
 def _comment_fingerprint(repository: str, issue_number: int, body: str) -> str:
     contract = json.dumps(
         {"repository": repository, "issue_number": issue_number, "body": body},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(contract).hexdigest()
+
+
+def _validate_pull_request(
+    base: str, head: str, title: str, body: str
+) -> tuple[str, str, str, str]:
+    normalized_base = _validate_branch(base, "base")
+    normalized_head = _validate_branch(head, "head")
+    if normalized_base == normalized_head:
+        raise ToolError("GitHub pull-request base and head branches must differ.")
+    normalized_title = title.strip()
+    if not normalized_title or len(normalized_title) > MAX_GITHUB_PULL_TITLE_CHARS:
+        raise ToolError("GitHub pull-request title must be 1-200 non-whitespace characters.")
+    if len(body) > MAX_GITHUB_PULL_BODY_CHARS:
+        raise ToolError("GitHub pull-request body exceeds the 10,000-character limit.")
+    return normalized_base, normalized_head, normalized_title, body
+
+
+def _validate_branch(branch: str, field: str) -> str:
+    normalized = branch.strip()
+    valid_shape = re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,199}", normalized)
+    segments = normalized.split("/")
+    if (
+        not valid_shape
+        or ".." in normalized
+        or "//" in normalized
+        or normalized.endswith(("/", "."))
+        or any(segment.startswith(".") or segment.endswith(".lock") for segment in segments)
+    ):
+        raise ToolError(f"GitHub pull-request {field} branch is not a safe branch name.")
+    return normalized
+
+
+def _pull_fingerprint(
+    repository: str, base: str, head: str, title: str, body: str, draft: bool
+) -> str:
+    contract = json.dumps(
+        {
+            "repository": repository,
+            "base": base,
+            "head": head,
+            "title": title,
+            "body": body,
+            "draft": draft,
+        },
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")

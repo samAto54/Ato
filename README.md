@@ -39,6 +39,7 @@ The current Phase 9 build provides:
 - Confirmed read-only GitHub access for one configured repository
 - Preview-guarded, HIGH-confirmation GitHub issue creation
 - Preview-guarded comments targeting one exact GitHub issue number
+- Preview-guarded pull-request creation between existing same-repository branches
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -178,6 +179,15 @@ issue number, and normalized body together. `create_github_comment` requires `HI
 a token, and an exact fingerprint match before posting. A known successful fingerprint cannot be
 submitted twice in one process. Comments cannot be edited or deleted, and an ambiguous network
 failure must be reviewed instead of automatically retried.
+
+Pull-request creation is also preview guarded. `preview_github_pull_request` validates and
+fingerprints the configured repository, distinct base and head branches, title, body, and draft
+state without using the network. Branch names use a conservative same-repository format; fork
+qualified heads are rejected. `create_github_pull_request` requires `HIGH` confirmation, a token,
+and an exact fingerprint match. Titles are capped at 200 characters and bodies at 10,000. Known
+successful submissions are blocked from repeating in the same process. Ato cannot create or
+delete branches, merge or close pull requests, submit reviews, or retry ambiguous failures
+automatically.
 
 ## Run Ato
 

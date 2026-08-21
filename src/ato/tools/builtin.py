@@ -525,6 +525,32 @@ def build_phase3_registry(
             )
         )
 
+    def preview_github_pull_request(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.preview_pull_request(
+                str(arguments["base"]),
+                str(arguments["head"]),
+                str(arguments["title"]),
+                str(arguments.get("body", "")),
+                bool(arguments.get("draft", False)),
+            )
+        )
+
+    def create_github_pull_request(arguments: Mapping[str, Any]) -> str:
+        assert github_client is not None
+        return json.dumps(
+            github_client.create_pull_request(
+                str(arguments["base"]),
+                str(arguments["head"]),
+                str(arguments["title"]),
+                str(arguments.get("body", "")),
+                bool(arguments.get("draft", False)),
+                str(arguments["expected_repository"]),
+                str(arguments["expected_sha256"]),
+            )
+        )
+
     def verify_code_change(arguments: Mapping[str, Any]) -> str:
         del arguments
         syntax = _verify_python_syntax()
@@ -1130,6 +1156,65 @@ def build_phase3_registry(
                     "additionalProperties": False,
                 },
                 handler=create_github_comment,
+                permission=PermissionLevel.HIGH,
+            )
+        )
+        pull_properties = {
+            "base": {"type": "string", "minLength": 1, "maxLength": 200},
+            "head": {"type": "string", "minLength": 1, "maxLength": 200},
+            "title": {"type": "string", "minLength": 1, "maxLength": 200},
+            "body": {"type": "string", "maxLength": 10_000},
+            "draft": {"type": "boolean"},
+        }
+        registry.register(
+            ToolSpec(
+                name="preview_github_pull_request",
+                description=(
+                    "Preview a pull request between two branches in the configured repository "
+                    "and return its review fingerprint. Does not use the network."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": pull_properties,
+                    "required": ["base", "head", "title"],
+                    "additionalProperties": False,
+                },
+                handler=preview_github_pull_request,
+                permission=PermissionLevel.LOW,
+            )
+        )
+        registry.register(
+            ToolSpec(
+                name="create_github_pull_request",
+                description=(
+                    "Create one previously previewed pull request between existing branches "
+                    "after HIGH confirmation. Cannot merge or delete branches."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        **pull_properties,
+                        "expected_repository": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 200,
+                        },
+                        "expected_sha256": {
+                            "type": "string",
+                            "minLength": 64,
+                            "maxLength": 64,
+                        },
+                    },
+                    "required": [
+                        "base",
+                        "head",
+                        "title",
+                        "expected_repository",
+                        "expected_sha256",
+                    ],
+                    "additionalProperties": False,
+                },
+                handler=create_github_pull_request,
                 permission=PermissionLevel.HIGH,
             )
         )
