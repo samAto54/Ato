@@ -1,12 +1,33 @@
 import json
 import socket
+from email.message import Message
+from io import BytesIO
+from urllib.parse import urlsplit
 
 import pytest
+from pypdf import PdfWriter
+from reportlab.pdfgen import canvas
 
+import ato.tools.web as web_tools
 from ato.exceptions import ToolError
 from ato.security.permissions import PermissionManager
 from ato.tools import build_phase3_registry
 from ato.tools.web import _extract_readable_text, _validate_public_https_url
+
+
+class FakeWebResponse:
+    def __init__(self, body: bytes, content_type: str = "application/pdf") -> None:
+        self.status = 200
+        self.body = body
+        self.closed = False
+        self.headers = Message()
+        self.headers["Content-Type"] = content_type
+
+    def read(self, limit: int) -> bytes:
+        return self.body[:limit]
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _resolver_for(address: str):
@@ -82,3 +103,63 @@ def test_web_fetch_tool_requires_medium_confirmation(tmp_path) -> None:
     assert seen[0].level.value == "MEDIUM"
     assert calls == ["https://example.com/research"]
     assert result["text"] == "Evidence"
+
+
+def test_web_fetch_extracts_public_pdf_with_page_labels(monkeypatch) -> None:
+    stream = BytesIO()
+    pdf = canvas.Canvas(stream)
+    pdf.drawString(72, 720, "Ato public research evidence")
+    pdf.showPage()
+    pdf.drawString(72, 720, "Second page finding")
+    pdf.save()
+    response = FakeWebResponse(stream.getvalue())
+    monkeypatch.setattr(
+        web_tools,
+        "_validate_public_https_url",
+        lambda url: (urlsplit(url), ("93.184.216.34",)),
+    )
+    monkeypatch.setattr(web_tools, "_request_public_address", lambda parsed, addresses: response)
+
+    result = json.loads(web_tools.fetch_web_page("https://example.com/report.pdf"))
+
+    assert result["document_type"] == "pdf"
+    assert result["pages"] == 2
+    assert "[PDF page 1]" in result["text"]
+    assert "[PDF page 2]" in result["text"]
+    assert result["source_url"] == "https://example.com/report.pdf"
+    assert response.closed is True
+
+
+def test_web_fetch_rejects_encrypted_and_image_only_pdfs(monkeypatch) -> None:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    writer.encrypt("password")
+    encrypted = BytesIO()
+    writer.write(encrypted)
+    responses = iter(
+        [
+            FakeWebResponse(encrypted.getvalue()),
+            FakeWebResponse(_blank_pdf()),
+        ]
+    )
+    monkeypatch.setattr(
+        web_tools,
+        "_validate_public_https_url",
+        lambda url: (urlsplit(url), ("93.184.216.34",)),
+    )
+    monkeypatch.setattr(
+        web_tools, "_request_public_address", lambda parsed, addresses: next(responses)
+    )
+
+    with pytest.raises(ToolError, match="Encrypted"):
+        web_tools.fetch_web_page("https://example.com/encrypted.pdf")
+    with pytest.raises(ToolError, match="OCR is unavailable"):
+        web_tools.fetch_web_page("https://example.com/scanned.pdf")
+
+
+def _blank_pdf() -> bytes:
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    stream = BytesIO()
+    writer.write(stream)
+    return stream.getvalue()
