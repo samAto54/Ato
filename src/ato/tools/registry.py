@@ -60,6 +60,10 @@ class ToolRegistry:
     def api_definitions(self) -> list[dict[str, Any]]:
         return [tool.api_definition() for tool in self._tools.values()]
 
+    def has_tool(self, name: str) -> bool:
+        """Return whether one exact allowlisted tool is currently available."""
+        return name in self._tools
+
     def execute(
         self,
         name: str,

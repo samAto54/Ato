@@ -10,6 +10,7 @@ The current build provides:
 
 - An interactive terminal conversation
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
+- A secret-free `/status` view of local memory, knowledge, tool, and voice availability
 - Incremental streaming responses in the terminal
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -253,6 +254,8 @@ python -m ato
 
 You can also run the installed `ato` command. Enter `exit` or `quit` to close.
 Enter `/help` to display the terminal command reference without making a model API request.
+Enter `/status` to check which local subsystems are ready or not configured. The status view does
+not call the model, probe the network, print provider credentials, or expose configured paths.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.

@@ -44,6 +44,19 @@ def test_terminal_help_lists_commands_without_calling_the_model() -> None:
     assert not any(line.startswith("Ato: Echo:") for line in output)
 
 
+def test_terminal_status_reports_local_subsystem_availability() -> None:
+    inputs = iter(["/status", "quit"])
+    output: list[str] = []
+
+    run_terminal(Agent(EchoLLM()), read=lambda prompt: next(inputs), write=output.append)
+
+    status = next(line for line in output if line.startswith("Ato local status:"))
+    assert "conversation: ready" in status
+    assert "persistent conversation: not configured" in status
+    assert "voice input: not configured" in status
+    assert not any(line.startswith("Ato: Echo:") for line in output)
+
+
 def test_terminal_saves_successful_turns(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     inputs = iter(["Hello", "quit"])

@@ -164,6 +164,22 @@ def test_voice_command_reports_unavailable_tools() -> None:
     assert "Ato error: Voice tools are unavailable." in output
 
 
+def test_status_detects_configured_voice_input_tools(tmp_path) -> None:
+    inputs = iter(["/status", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(RecordingLLM()),
+        tool_registry=_registry(tmp_path, "hello"),
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    status = next(line for line in output if line.startswith("Ato local status:"))
+    assert "voice input: ready" in status
+    assert "voice output: not configured" in status
+
+
 def test_speak_last_reads_latest_assistant_reply(tmp_path) -> None:
     player = Player()
     registry = build_phase3_registry(

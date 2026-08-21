@@ -29,6 +29,7 @@ from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpee
 
 EXIT_COMMANDS = {"exit", "quit"}
 HELP_COMMAND = "/help"
+STATUS_COMMAND = "/status"
 CLEAR_MEMORY_COMMAND = "/clear-memory"
 LIST_MEMORIES_COMMAND = "/memories"
 REMEMBER_PREFIX = "/remember "
@@ -47,6 +48,7 @@ SPEAK_LAST_COMMAND = "/speak-last"
 
 HELP_TEXT = """Ato terminal commands:
   /help                              Show this command reference
+  /status                            Show local subsystem availability
   /clear-memory                      Clear conversation history
   /remember [category:] <text>       Save a long-term memory
   /memories                          List active long-term memories
@@ -106,6 +108,25 @@ def run_terminal(
             return
         if user_input.lower() == HELP_COMMAND:
             write(HELP_TEXT)
+            continue
+        if user_input.lower() == STATUS_COMMAND:
+            voice_input_ready = tool_registry is not None and all(
+                tool_registry.has_tool(name)
+                for name in ("record_microphone", "transcribe_audio")
+            )
+            voice_output_ready = (
+                tool_registry is not None and tool_registry.has_tool("speak_text")
+            )
+            write(
+                "Ato local status:\n"
+                "  conversation: ready\n"
+                f"  persistent conversation: {_status(memory_store is not None)}\n"
+                f"  long-term memory: {_status(long_term_memory is not None)}\n"
+                f"  knowledge: {_status(knowledge_store is not None)}\n"
+                f"  tools: {_status(tool_registry is not None)}\n"
+                f"  voice input: {_status(voice_input_ready)}\n"
+                f"  voice output: {_status(voice_output_ready)}"
+            )
             continue
         if user_input.lower() == SPEAK_LAST_COMMAND:
             if tool_registry is None:
@@ -457,6 +478,10 @@ def _write_terminal_chunk(text: str) -> None:
     """Write one response fragment without inserting extra line breaks."""
     sys.stdout.write(text)
     sys.stdout.flush()
+
+
+def _status(available: bool) -> str:
+    return "ready" if available else "not configured"
 
 
 def _deliver_agent_turn(
