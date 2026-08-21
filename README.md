@@ -294,6 +294,9 @@ desktop-specific system policy prohibits claims that unavailable browsing, files
 other tool actions were performed. Use the terminal `ato` command for the full tool system. The
 bottom composer is reserved before the expanding transcript so input controls remain visible at
 supported window sizes.
+Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
+Markup characters are removed for readability, unsupported control characters are replaced, and
+URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
