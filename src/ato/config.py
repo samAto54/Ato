@@ -33,6 +33,7 @@ class Settings:
     tavily_api_key: str | None = None
     github_repository: str | None = None
     github_token: str | None = None
+    voice_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -69,6 +70,10 @@ class Settings:
         github_token = (
             None if raw_github_token in {"", "your_github_token_here"} else raw_github_token
         )
+        raw_voice_enabled = os.getenv("ATO_VOICE_ENABLED", "false").strip().casefold()
+        if raw_voice_enabled not in {"true", "false"}:
+            raise ConfigurationError("ATO_VOICE_ENABLED must be true or false.")
+        voice_enabled = raw_voice_enabled == "true"
 
         if not api_key or api_key == "your_deepseek_api_key_here":
             raise ConfigurationError(
@@ -122,4 +127,5 @@ class Settings:
             tavily_api_key=tavily_api_key,
             github_repository=github_repository,
             github_token=github_token,
+            voice_enabled=voice_enabled,
         )
