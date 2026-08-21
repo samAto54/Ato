@@ -57,6 +57,16 @@ def test_terminal_status_reports_local_subsystem_availability() -> None:
     assert not any(line.startswith("Ato: Echo:") for line in output)
 
 
+def test_terminal_rejects_unknown_slash_command_without_calling_model() -> None:
+    inputs = iter(["/memorries", "quit"])
+    output: list[str] = []
+
+    run_terminal(Agent(EchoLLM()), read=lambda prompt: next(inputs), write=output.append)
+
+    assert "Ato error: Unknown command /memorries. Use /help to list commands." in output
+    assert not any(line.startswith("Ato: Echo:") for line in output)
+
+
 def test_terminal_saves_successful_turns(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     inputs = iter(["Hello", "quit"])
