@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -122,16 +123,73 @@ class ToolRegistry:
         if missing:
             raise ToolError(f"Missing arguments for {tool.name}: {sorted(missing)}")
 
-        python_types = {"string": str, "boolean": bool, "integer": int, "array": list}
         for key, value in arguments.items():
-            expected_name = properties[key].get("type")
-            expected_type = python_types.get(expected_name)
-            if expected_type is not None and not isinstance(value, expected_type):
-                raise ToolError(f"Argument {key} for {tool.name} must be {expected_name}.")
-            if expected_name == "array":
-                item_type_name = properties[key].get("items", {}).get("type")
-                item_type = python_types.get(item_type_name)
-                if item_type is not None and any(not isinstance(item, item_type) for item in value):
-                    raise ToolError(
-                        f"Every item in {key} for {tool.name} must be {item_type_name}."
-                    )
+            _validate_schema_value(tool.name, key, value, properties[key])
+
+
+def _validate_schema_value(
+    tool_name: str, path: str, value: Any, schema: Mapping[str, Any]
+) -> None:
+    expected_name = schema.get("type")
+    valid_type = True
+    if expected_name == "string":
+        valid_type = isinstance(value, str)
+    elif expected_name == "boolean":
+        valid_type = isinstance(value, bool)
+    elif expected_name == "integer":
+        valid_type = isinstance(value, int) and not isinstance(value, bool)
+    elif expected_name == "number":
+        valid_type = isinstance(value, (int, float)) and not isinstance(value, bool)
+    elif expected_name == "array":
+        valid_type = isinstance(value, list)
+    elif expected_name == "object":
+        valid_type = isinstance(value, Mapping)
+    if not valid_type:
+        raise ToolError(f"Argument {path} for {tool_name} must be {expected_name}.")
+
+    if "enum" in schema and value not in schema["enum"]:
+        raise ToolError(f"Argument {path} for {tool_name} is not an allowed value.")
+
+    if isinstance(value, str):
+        if "minLength" in schema and len(value) < int(schema["minLength"]):
+            raise ToolError(f"Argument {path} for {tool_name} is too short.")
+        if "maxLength" in schema and len(value) > int(schema["maxLength"]):
+            raise ToolError(f"Argument {path} for {tool_name} is too long.")
+
+    if expected_name in {"integer", "number"}:
+        if "minimum" in schema and value < schema["minimum"]:
+            raise ToolError(f"Argument {path} for {tool_name} is below the minimum.")
+        if "maximum" in schema and value > schema["maximum"]:
+            raise ToolError(f"Argument {path} for {tool_name} exceeds the maximum.")
+
+    if isinstance(value, list):
+        if "minItems" in schema and len(value) < int(schema["minItems"]):
+            raise ToolError(f"Argument {path} for {tool_name} has too few items.")
+        if "maxItems" in schema and len(value) > int(schema["maxItems"]):
+            raise ToolError(f"Argument {path} for {tool_name} has too many items.")
+        if schema.get("uniqueItems") and len({_json_safe_key(item) for item in value}) != len(
+            value
+        ):
+            raise ToolError(f"Argument {path} for {tool_name} must contain unique items.")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            for index, item in enumerate(value):
+                _validate_schema_value(tool_name, f"{path}[{index}]", item, item_schema)
+
+    if isinstance(value, Mapping) and expected_name == "object":
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        unknown = set(value) - set(properties)
+        if unknown and schema.get("additionalProperties") is False:
+            raise ToolError(f"Argument {path} for {tool_name} has unexpected fields.")
+        missing = set(required) - set(value)
+        if missing:
+            raise ToolError(f"Argument {path} for {tool_name} is missing required fields.")
+        for key, item in value.items():
+            if key in properties:
+                _validate_schema_value(tool_name, f"{path}.{key}", item, properties[key])
+
+
+def _json_safe_key(value: Any) -> str:
+    """Return a stable comparison key for JSON-compatible array items."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))

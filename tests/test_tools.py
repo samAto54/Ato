@@ -52,8 +52,61 @@ def test_registry_validates_array_item_types() -> None:
         )
     )
 
-    with pytest.raises(ToolError, match="Every item"):
+    with pytest.raises(ToolError, match=r"values\[1\].*string"):
         registry.execute("paths", {"values": ["valid", 2]})
+
+
+def test_registry_enforces_schema_constraints_before_execution() -> None:
+    calls = 0
+
+    def handler(arguments: object) -> str:
+        nonlocal calls
+        calls += 1
+        return "ok"
+
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="bounded",
+            description="Bounded input.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["safe"]},
+                    "name": {"type": "string", "minLength": 2, "maxLength": 4},
+                    "count": {"type": "integer", "minimum": 1, "maximum": 3},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 2,
+                        "uniqueItems": True,
+                    },
+                },
+                "required": ["mode", "name", "count", "tags"],
+                "additionalProperties": False,
+            },
+            handler=handler,
+        )
+    )
+
+    invalid_arguments = [
+        {"mode": "unsafe", "name": "Ato", "count": 1, "tags": ["a"]},
+        {"mode": "safe", "name": "A", "count": 1, "tags": ["a"]},
+        {"mode": "safe", "name": "Ato", "count": True, "tags": ["a"]},
+        {"mode": "safe", "name": "Ato", "count": 4, "tags": ["a"]},
+        {"mode": "safe", "name": "Ato", "count": 1, "tags": []},
+        {"mode": "safe", "name": "Ato", "count": 1, "tags": ["a", "a"]},
+    ]
+    for arguments in invalid_arguments:
+        with pytest.raises(ToolError):
+            registry.execute("bounded", arguments)
+
+    assert calls == 0
+    assert registry.execute(
+        "bounded", {"mode": "safe", "name": "Ato", "count": 2, "tags": ["a", "b"]}
+    ) == "ok"
+    assert calls == 1
 
 
 def test_file_tools_are_limited_to_workspace(tmp_path: Path) -> None:
