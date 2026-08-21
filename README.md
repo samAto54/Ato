@@ -28,6 +28,7 @@ The current Phase 8 build provides:
 - Optional confirmed Tavily or Brave web search with bounded, untrusted result snippets
 - Confirmed multi-source web research with URL deduplication, host diversity, and partial failures
 - Stable evidence-passage IDs and conservative cross-source numeric disagreement hints
+- Structured research coverage, uncertainty, source-gap, and inference-boundary assessment
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -200,6 +201,15 @@ only when passages from separate sources share query terms. These entries are la
 `potential_numeric_disagreement`; they require source review and are not treated as verified
 contradictions. Distinct values are preserved so Ato can explain uncertainty rather than silently
 selecting whichever source appeared first.
+
+The `report_assessment` object gives Ato a deterministic scaffold for presenting research without
+inventing confidence. It labels evidence coverage as `none`, `limited`, or `multi_source`, counts
+successful sources and independent hostnames, lists evidence IDs, and records failures,
+evidence-free sources, truncation, and disagreement review flags. It also defines an explicit
+inference boundary: statements directly grounded in listed evidence may be described as
+source-supported, while synthesis beyond those passages must be labelled as inference. These
+signals organize the final response but do not replace model judgment or independently verify
+the truth, authority, or freshness of a source.
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:

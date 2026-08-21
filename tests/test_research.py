@@ -68,6 +68,11 @@ def test_research_coordinator_deduplicates_diversifies_and_bounds_sources() -> N
     assert all(len(source["text"]) == 2_500 for source in result["sources"])
     assert all(source["text_truncated"] is True for source in result["sources"])
     assert result["content_trust"] == "untrusted_external"
+    assessment = result["report_assessment"]
+    assert assessment["coverage"] == "multi_source"
+    assert assessment["successful_sources"] == 3
+    assert assessment["independent_hosts"] == 2
+    assert "truncated_source_text" in assessment["uncertainty_flags"]
     assert len(raw_result) < 12_000
 
 
@@ -90,6 +95,12 @@ def test_research_coordinator_reports_source_failures_without_losing_evidence() 
     assert result["failures"] == [
         {"source_url": "https://bad.example/", "error": "Source rejected safely."}
     ]
+    assessment = result["report_assessment"]
+    assert assessment["coverage"] == "none"
+    assert assessment["source_gaps"]["failed_urls"] == ["https://bad.example/"]
+    assert assessment["source_gaps"]["sources_without_evidence"] == ["S1"]
+    assert "source_fetch_failures" in assessment["uncertainty_flags"]
+    assert "no_query_relevant_passages" in assessment["uncertainty_flags"]
 
 
 def test_research_maps_relevant_passages_and_flags_only_potential_disagreements() -> None:
@@ -125,6 +136,11 @@ def test_research_maps_relevant_passages_and_flags_only_potential_disagreements(
     assert hint["evidence_ids"] == ["S1-E1", "S2-E1"]
     assert hint["values"] == [["20%"], ["30%"]]
     assert "do not by themselves prove" in result["analysis_notice"]
+    assessment = result["report_assessment"]
+    assert assessment["coverage"] == "multi_source"
+    assert assessment["supported_evidence_ids"] == ["S1-E1", "S1-E2", "S2-E1"]
+    assert "potential_numeric_disagreement" in assessment["uncertainty_flags"]
+    assert "labelled as inference" in assessment["inference_boundary"]
 
 
 def test_research_does_not_flag_numbers_without_shared_query_context() -> None:
@@ -146,6 +162,22 @@ def test_research_does_not_flag_numbers_without_shared_query_context() -> None:
     )
 
     assert result["potential_disagreements"] == []
+
+
+def test_research_report_assessment_exposes_empty_search_gaps() -> None:
+    result = json.loads(WebResearchCoordinator(FakeSearcher([]), _page).research("missing", 3))
+
+    assessment = result["report_assessment"]
+    assert assessment["coverage"] == "none"
+    assert assessment["successful_sources"] == 0
+    assert assessment["source_gaps"] == {
+        "requested_sources": 3,
+        "searched_results": 0,
+        "selected_results": 0,
+        "failed_urls": [],
+        "sources_without_evidence": [],
+    }
+    assert "no_query_relevant_passages" in assessment["uncertainty_flags"]
 
 
 @pytest.mark.parametrize("max_sources", [0, 4])
