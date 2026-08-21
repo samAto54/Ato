@@ -4,6 +4,8 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message, Role
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
+from ato.security import PermissionManager
+from ato.tools import build_phase3_registry
 from ato.ui.terminal import HELP_TEXT, run_terminal
 
 
@@ -18,6 +20,14 @@ class StreamingEchoLLM(EchoLLM):
         del tools
         yield "Echo: "
         yield messages[-1].content
+
+
+class RecordingClipboard:
+    def __init__(self) -> None:
+        self.values: list[str] = []
+
+    def write(self, text: str) -> None:
+        self.values.append(text)
 
 
 def test_terminal_conversation_and_exit() -> None:
@@ -99,6 +109,48 @@ def test_terminal_history_reports_empty_conversation() -> None:
     run_terminal(Agent(EchoLLM()), read=lambda prompt: next(inputs), write=output.append)
 
     assert "Ato: No conversation messages yet." in output
+
+
+def test_terminal_copies_latest_assistant_reply_after_confirmation(tmp_path) -> None:
+    clipboard = RecordingClipboard()
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+        clipboard_writer=clipboard,
+    )
+    inputs = iter(["first", "second", "/copy-last", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM()),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert clipboard.values == ["Echo: second"]
+    assert "Ato: Copied the latest reply to the clipboard." in output
+
+
+def test_terminal_copy_last_requires_existing_reply(tmp_path) -> None:
+    clipboard = RecordingClipboard()
+    registry = build_phase3_registry(
+        tmp_path,
+        PermissionManager(lambda request: True),
+        clipboard_writer=clipboard,
+    )
+    inputs = iter(["/copy-last", "quit"])
+    output: list[str] = []
+
+    run_terminal(
+        Agent(EchoLLM()),
+        tool_registry=registry,
+        read=lambda prompt: next(inputs),
+        write=output.append,
+    )
+
+    assert clipboard.values == []
+    assert "Ato error: There is no assistant reply to copy yet." in output
 
 
 def test_terminal_saves_successful_turns(tmp_path) -> None:
