@@ -15,6 +15,7 @@ from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, MemoryCategory, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
+from ato.research import SqliteResearchStore
 from ato.security import AuditLogger, PermissionManager, PermissionRequest
 from ato.tools import build_phase3_registry
 from ato.tools.search import BraveSearchClient, TavilySearchClient
@@ -416,6 +417,7 @@ def main() -> None:
         memory_context = memory_store.load_context()
         long_term_memory = SqliteLongTermMemory(settings.long_term_memory_file)
         knowledge_store = SqliteKnowledgeStore(settings.knowledge_file, settings.workspace_root)
+        research_store = SqliteResearchStore(settings.research_file)
         tool_registry = build_phase3_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
@@ -429,6 +431,7 @@ def main() -> None:
                     else None
                 )
             ),
+            research_store=research_store,
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")

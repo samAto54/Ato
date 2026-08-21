@@ -29,6 +29,7 @@ The current Phase 8 build provides:
 - Confirmed multi-source web research with URL deduplication, host diversity, and partial failures
 - Stable evidence-passage IDs and conservative cross-source numeric disagreement hints
 - Structured research coverage, uncertainty, source-gap, and inference-boundary assessment
+- Local research-session history and confirmed, non-overwriting Markdown evidence exports
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -210,6 +211,17 @@ inference boundary: statements directly grounded in listed evidence may be descr
 source-supported, while synthesis beyond those passages must be labelled as inference. These
 signals organize the final response but do not replace model judgment or independently verify
 the truth, authority, or freshness of a source.
+
+Successful `research_web` runs are saved to the ignored local SQLite file configured by
+`ATO_RESEARCH_FILE` and return a `session_id`. `list_research_sessions` exposes bounded metadata
+without replaying page text. `export_research_report` requires `HIGH` confirmation and writes one
+new `.md` file inside the authorized workspace; it refuses protected paths, missing parent
+directories, unsupported extensions, and existing targets. Exports contain evidence passages,
+exact source URLs, coverage, uncertainty flags, failures, and disagreement hints—not a fabricated
+narrative conclusion. Raw HTML and Markdown control characters from untrusted sources are escaped
+to prevent embedded headings, links, or tracking images from becoming active report markup.
+Session payloads are capped at 20,000 characters, reports at 50,000 characters, listings at 100,
+and the database at 1,000 sessions. Local research data is excluded from Git.
 
 The default test suite never makes network requests. To exercise the real TLS, DNS, response,
 and HTML extraction path from a network-enabled terminal, run the explicitly opted-in check:

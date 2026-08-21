@@ -21,6 +21,10 @@ class MemoryStoreError(AtoError):
     """Raised when persistent memory cannot be read, written, or cleared."""
 
 
+class ResearchStoreError(AtoError):
+    """Raised when persisted research sessions cannot be managed safely."""
+
+
 class ContextWindowError(AtoError):
     """Raised when recent content cannot fit safely inside the context budget."""
 
