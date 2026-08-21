@@ -15,6 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from ato.exceptions import ToolError
+from ato.research import SqliteResearchStore
 from ato.security.audit import AuditLogger
 from ato.security.permissions import PermissionLevel, PermissionManager
 from ato.tools.registry import ToolRegistry, ToolSpec
@@ -91,13 +92,14 @@ def build_phase3_registry(
     audit_logger: AuditLogger | None = None,
     web_fetcher: Callable[[str], str] | None = None,
     web_searcher: WebSearchClient | None = None,
+    research_store: SqliteResearchStore | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
     registry = ToolRegistry(permission_manager, audit_logger)
     approved_web_fetcher = web_fetcher or fetch_web_page
     research_coordinator = (
-        WebResearchCoordinator(web_searcher, approved_web_fetcher)
+        WebResearchCoordinator(web_searcher, approved_web_fetcher, research_store)
         if web_searcher is not None
         else None
     )
@@ -651,6 +653,90 @@ def build_phase3_registry(
                 permission=PermissionLevel.MEDIUM,
             )
         )
+        if research_store is not None:
+
+            def list_research_sessions(arguments: Mapping[str, Any]) -> str:
+                records = research_store.list_sessions(int(arguments.get("limit", 20)))
+                return json.dumps(
+                    {
+                        "sessions": [
+                            {
+                                "id": record.id,
+                                "query": record.query,
+                                "created_at": record.created_at,
+                                "successful_sources": record.successful_sources,
+                                "coverage": record.coverage,
+                            }
+                            for record in records
+                        ]
+                    }
+                )
+
+            def export_research_report(arguments: Mapping[str, Any]) -> str:
+                session_id = int(arguments["session_id"])
+                path = boundary.write_target(str(arguments["path"]))
+                if path.suffix.casefold() != ".md":
+                    raise ToolError("Research reports must use a .md file extension.")
+                if path.exists():
+                    raise ToolError("Research report export never overwrites an existing file.")
+                if not path.parent.is_dir():
+                    raise ToolError("Research report parent directory does not exist.")
+                report = research_store.render_markdown(session_id)
+                if report is None:
+                    raise ToolError("Research session ID was not found.")
+                if len(report.encode("utf-8")) > MAX_WRITE_BYTES:
+                    raise ToolError("Research report exceeds the export size limit.")
+                try:
+                    _atomic_create_text(path, report)
+                except FileExistsError as exc:
+                    raise ToolError(
+                        "Research report export never overwrites an existing file."
+                    ) from exc
+                except OSError as exc:
+                    raise ToolError("Research report could not be created atomically.") from exc
+                return json.dumps(
+                    {
+                        "session_id": session_id,
+                        "path": path.relative_to(boundary.root).as_posix(),
+                        "bytes": len(report.encode("utf-8")),
+                    }
+                )
+
+            registry.register(
+                ToolSpec(
+                    name="list_research_sessions",
+                    description="List bounded locally saved research sessions without page text.",
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+                        },
+                        "additionalProperties": False,
+                    },
+                    handler=list_research_sessions,
+                    permission=PermissionLevel.LOW,
+                )
+            )
+            registry.register(
+                ToolSpec(
+                    name="export_research_report",
+                    description=(
+                        "Export one saved research evidence session to a new Markdown file. "
+                        "Requires HIGH confirmation and never overwrites files."
+                    ),
+                    parameters={
+                        "type": "object",
+                        "properties": {
+                            "session_id": {"type": "integer", "minimum": 1},
+                            "path": {"type": "string", "minLength": 1, "maxLength": 500},
+                        },
+                        "required": ["session_id", "path"],
+                        "additionalProperties": False,
+                    },
+                    handler=export_research_report,
+                    permission=PermissionLevel.HIGH,
+                )
+            )
         assert research_coordinator is not None
         registry.register(
             ToolSpec(

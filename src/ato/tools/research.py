@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from ato.exceptions import ToolError
+from ato.research import SqliteResearchStore
 from ato.tools.search import WebSearchClient
 
 MAX_RESEARCH_SOURCES = 3
@@ -47,9 +48,15 @@ STOP_WORDS = {
 class WebResearchCoordinator:
     """Search, diversify, and fetch a small set of untrusted public sources."""
 
-    def __init__(self, searcher: WebSearchClient, fetcher: Callable[[str], str]) -> None:
+    def __init__(
+        self,
+        searcher: WebSearchClient,
+        fetcher: Callable[[str], str],
+        session_store: SqliteResearchStore | None = None,
+    ) -> None:
         self._searcher = searcher
         self._fetcher = fetcher
+        self._session_store = session_store
 
     def research(self, query: str, max_sources: int = 3) -> str:
         if not 1 <= max_sources <= MAX_RESEARCH_SOURCES:
@@ -108,24 +115,26 @@ class WebResearchCoordinator:
             requested_sources=max_sources,
         )
 
-        return json.dumps(
-            {
-                "query": str(search_payload.get("query", query)),
-                "provider": str(search_payload.get("provider", "unknown")),
-                "content_trust": "untrusted_external",
-                "sources": sources,
-                "evidence_map": evidence_map,
-                "potential_disagreements": disagreements,
-                "report_assessment": report_assessment,
-                "analysis_notice": (
-                    "Passage matching is lexical. Numeric disagreement hints require review "
-                    "and do not by themselves prove a contradiction."
-                ),
-                "failures": failures,
-                "searched_results": len(raw_results),
-                "selected_results": len(candidates),
-            }
-        )
+        result = {
+            "query": str(search_payload.get("query", query)),
+            "provider": str(search_payload.get("provider", "unknown")),
+            "content_trust": "untrusted_external",
+            "sources": sources,
+            "evidence_map": evidence_map,
+            "potential_disagreements": disagreements,
+            "report_assessment": report_assessment,
+            "analysis_notice": (
+                "Passage matching is lexical. Numeric disagreement hints require review "
+                "and do not by themselves prove a contradiction."
+            ),
+            "failures": failures,
+            "searched_results": len(raw_results),
+            "selected_results": len(candidates),
+        }
+        if self._session_store is not None:
+            session = self._session_store.save(result["query"], result)
+            result["session_id"] = session.id
+        return json.dumps(result)
 
 
 def _parse_object(value: str, error: str) -> Mapping[str, Any]:
