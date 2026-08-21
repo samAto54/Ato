@@ -36,6 +36,7 @@ from ato.tools.research import WebResearchCoordinator
 from ato.tools.search import WebSearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
+from ato.voice import WindowsSpeechPlayer, validate_synthesis_text
 
 IGNORED_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
 MAX_LIST_RESULTS = 200
@@ -119,6 +120,7 @@ def build_phase3_registry(
     clipboard_writer: ClipboardWriter | None = None,
     application_launcher: ApplicationLauncher | None = None,
     process_monitor: ProcessMonitor | None = None,
+    speech_player: WindowsSpeechPlayer | None = None,
 ) -> ToolRegistry:
     """Create bounded Phase 3 tools with no arbitrary command access."""
     boundary = WorkspaceBoundary(workspace_root)
@@ -552,6 +554,12 @@ def build_phase3_registry(
         return json.dumps(
             {"processes": processes[:limit], "truncated": len(processes) > limit}
         )
+
+    def speak_text(arguments: Mapping[str, Any]) -> str:
+        assert speech_player is not None
+        text = validate_synthesis_text(str(arguments["text"]))
+        speech_player.speak(text)
+        return json.dumps({"spoken": True, "characters": len(text), "provider": "windows"})
 
     def preview_github_issue(arguments: Mapping[str, Any]) -> str:
         assert github_client is not None
@@ -1376,6 +1384,25 @@ def build_phase3_registry(
                 },
                 handler=inspect_processes,
                 permission=PermissionLevel.MEDIUM,
+            )
+        )
+    if speech_player is not None:
+        registry.register(
+            ToolSpec(
+                name="speak_text",
+                description=(
+                    "Speak bounded text aloud using offline Windows TTS after HIGH confirmation."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "minLength": 1, "maxLength": 4_000}
+                    },
+                    "required": ["text"],
+                    "additionalProperties": False,
+                },
+                handler=speak_text,
+                permission=PermissionLevel.HIGH,
             )
         )
     registry.register(

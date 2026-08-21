@@ -45,6 +45,7 @@ The current Phase 9 build provides:
 - HIGH-confirmation launching of three fixed, argument-free Windows applications
 - Confirmed privacy-reduced process listings and exact-PID snapshot checks
 - Provider-neutral speech recognition and synthesis contracts with bounded payloads
+- Optional confirmed offline Windows text-to-speech playback
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments

@@ -6,5 +6,12 @@ from ato.voice.base import (
     SpeechSynthesizer,
     validate_synthesis_text,
 )
+from ato.voice.windows import WindowsSpeechPlayer
 
-__all__ = ["AudioPayload", "SpeechRecognizer", "SpeechSynthesizer", "validate_synthesis_text"]
+__all__ = [
+    "AudioPayload",
+    "SpeechRecognizer",
+    "SpeechSynthesizer",
+    "WindowsSpeechPlayer",
+    "validate_synthesis_text",
+]
