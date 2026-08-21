@@ -40,6 +40,7 @@ The current Phase 9 build provides:
 - Preview-guarded, HIGH-confirmation GitHub issue creation
 - Preview-guarded comments targeting one exact GitHub issue number
 - Preview-guarded pull-request creation between existing same-repository branches
+- Provider-neutral notifications with confirmed, clearly labelled terminal delivery
 - Bounded, versioned JSON memory with atomic writes
 - A `/clear-memory` command for deleting saved conversation context
 - An allowlisted tool registry with validated arguments
@@ -77,6 +78,7 @@ ato/
 |   |-- brain/          # Agent Core, messages, prompts, and LLM contract
 |   |-- knowledge/      # Local document ingestion, chunking, and retrieval
 |   |-- memory/         # Conversation JSON and durable SQLite fact persistence
+|   |-- notifications/  # Provider-neutral notifications and terminal delivery
 |   |-- providers/      # Provider-specific LLM adapters (DeepSeek initially)
 |   |-- security/       # Permission decisions, confirmations, and audit logging
 |   |-- tools/          # Allowlisted tools, validation, and workspace boundaries
@@ -188,6 +190,17 @@ and an exact fingerprint match. Titles are capped at 200 characters and bodies a
 successful submissions are blocked from repeating in the same process. Ato cannot create or
 delete branches, merge or close pull requests, submit reviews, or retry ambiguous failures
 automatically.
+
+## Phase 11 notifications
+
+The initial notification provider is deliberately local. `send_notification` requires `MEDIUM`
+confirmation and delivers a bounded title, message, and fixed `info`, `success`, `warning`, or
+`error` level through a provider-neutral interface. The terminal provider prefixes the heading
+with `[Ato notification/LEVEL]` and indents every message line so normal assistant output cannot
+silently impersonate a notification. Titles are one line and capped at 100 characters; messages
+are capped at 1,000. Unsafe terminal control characters are rejected, and every attempt uses the
+normal audit path. This phase does not provide Windows toast notifications, background delivery,
+external messaging, scheduling, alarms, or any guarantee that the user will see the message.
 
 ## Run Ato
 
