@@ -72,6 +72,7 @@ The current build provides:
 - Redacted append-only JSONL audit logging for every tool execution decision
 - A provider-neutral `LLMClient` interface
 - Built-in Standard and original Ato HUD desktop theme palettes with an allowlisted toggle
+- A native chat-only desktop shell with persisted conversation and background model requests
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -275,6 +276,20 @@ text file. Each message is capped at 1,000 characters, content lines are indente
 role labels, unsupported control characters are replaced, and older-message omissions are noted.
 The export requires HIGH confirmation, creates missing parent directories, and never overwrites an
 existing file. Plain text is used so conversation content cannot activate Markdown links or images.
+
+## Desktop shell
+
+Run the first native desktop interface after installing the package:
+
+```powershell
+ato-gui
+```
+
+The window provides persisted text chat, recent-history restoration, subsystem navigation placeholders,
+status indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
+Model requests run off the Tk event loop so the window remains responsive. This first GUI increment is
+deliberately chat-only: tool execution and permission prompts remain locked in the desktop shell until a
+thread-safe confirmation bridge is added. Use the terminal `ato` command for the full tool system.
 Successful turns are saved to `data/memory.json` and restored on the next run.
 Use `/clear-memory` to remove both the saved history and the current context.
 This does not remove separately approved long-term facts.
