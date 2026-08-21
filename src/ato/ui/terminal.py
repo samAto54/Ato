@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
+from ato.coding import SqliteEditCheckpointStore
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
@@ -418,6 +419,7 @@ def main() -> None:
         long_term_memory = SqliteLongTermMemory(settings.long_term_memory_file)
         knowledge_store = SqliteKnowledgeStore(settings.knowledge_file, settings.workspace_root)
         research_store = SqliteResearchStore(settings.research_file)
+        checkpoint_store = SqliteEditCheckpointStore(settings.edit_checkpoint_file)
         tool_registry = build_phase3_registry(
             settings.workspace_root,
             permission_manager=PermissionManager(confirm_tool),
@@ -432,6 +434,7 @@ def main() -> None:
                 )
             ),
             research_store=research_store,
+            checkpoint_store=checkpoint_store,
         )
     except AtoError as exc:
         print(f"Unable to start Ato: {exc}")

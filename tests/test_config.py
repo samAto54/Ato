@@ -17,6 +17,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setenv("ATO_LONG_TERM_MEMORY_FILE", "custom/facts.db")
     monkeypatch.setenv("ATO_KNOWLEDGE_FILE", "custom/knowledge.db")
     monkeypatch.setenv("ATO_RESEARCH_FILE", "custom/research.db")
+    monkeypatch.setenv("ATO_EDIT_CHECKPOINT_FILE", "custom/checkpoints.db")
     monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-test-key")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-test-key")
     settings = Settings.from_env()
@@ -32,6 +33,7 @@ def test_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     assert str(settings.long_term_memory_file) == "custom\\facts.db"
     assert str(settings.knowledge_file) == "custom\\knowledge.db"
     assert str(settings.research_file) == "custom\\research.db"
+    assert str(settings.edit_checkpoint_file) == "custom\\checkpoints.db"
     assert settings.brave_search_api_key == "brave-test-key"
     assert settings.tavily_api_key == "tavily-test-key"
 
