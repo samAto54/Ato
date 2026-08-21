@@ -53,3 +53,11 @@ def test_desktop_controller_exposes_bounded_read_only_sidebar_snapshots(tmp_path
         "#1  PREFERENCE  ACTIVE\nUse cyan for the Ato HUD.",
     )
     assert controller.knowledge_snapshot() == ("#1  guide.md\n1 indexed chunks",)
+
+
+def test_desktop_system_snapshot_is_local_and_does_not_probe_network(tmp_path) -> None:
+    controller = DesktopChatController(Agent(EchoLLM()), workspace_root=tmp_path)
+    lines = controller.system_snapshot()
+    assert any(line.startswith("OS  ") for line in lines)
+    assert any(line.startswith("CPU  ") for line in lines)
+    assert lines[-1] == "NETWORK  NOT PROBED"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
@@ -14,7 +15,10 @@ from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
+from ato.tools.system import collect_system_info
 from ato.ui.chat_format import ChatStyle, format_chat_content
+from ato.ui.orb import AtoOrbCanvas
+from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
@@ -35,6 +39,7 @@ class DesktopChatController:
     memory_store: JsonMemoryStore | None = None
     long_term_memory: SqliteLongTermMemory | None = None
     knowledge_store: SqliteKnowledgeStore | None = None
+    workspace_root: Path | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -78,11 +83,30 @@ class DesktopChatController:
             for document in documents
         )
 
+    def system_snapshot(self) -> tuple[str, ...]:
+        if self.workspace_root is None:
+            return ("SYSTEM DATA UNAVAILABLE",)
+        info = collect_system_info(self.workspace_root)
+        memory = info["memory_bytes"]
+        total = memory["total"]
+        available = memory["available"]
+        used_percent = (
+            round((int(total) - int(available)) / int(total) * 100)
+            if total and available is not None
+            else None
+        )
+        return (
+            f"OS  {info['os']['system']} {info['os']['release']}",
+            f"CPU  {info['cpu']['logical_cores'] or '?'} LOGICAL CORES",
+            f"RAM  {used_percent}% USED" if used_percent is not None else "RAM  UNAVAILABLE",
+            "NETWORK  NOT PROBED",
+        )
+
 
 class AtoDesktop:
     """Tk desktop chat with switchable Standard and original Ato HUD themes."""
 
-    def __init__(self, controller: DesktopChatController, theme: ThemeId = ThemeId.STANDARD):
+    def __init__(self, controller: DesktopChatController, theme: ThemeId = ThemeId.ATO_HUD):
         import tkinter as tk
 
         self._tk = tk
@@ -90,17 +114,26 @@ class AtoDesktop:
         self.theme = get_theme(theme)
         self.root = tk.Tk()
         self.root.title("Ato")
-        self.root.geometry("1100x720")
-        self.root.minsize(820, 560)
+        self.root.geometry("1440x900")
+        self.root.minsize(1024, 680)
+        try:
+            self.root.state("zoomed")
+        except tk.TclError:
+            pass
         self._busy = False
         self._section = "CHAT"
+        self.state_model = AtoStateModel()
+        self._fullscreen = False
         self._build()
         self._apply_theme()
         self._restore_visible_history()
+        self.root.bind("<F11>", self._toggle_fullscreen)
+        self.root.bind("<Escape>", self._leave_fullscreen)
+        self._refresh_hud()
 
     def _build(self) -> None:
         tk = self._tk
-        self.sidebar = tk.Frame(self.root, width=230)
+        self.sidebar = tk.Frame(self.root, width=240)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
 
@@ -108,6 +141,15 @@ class AtoDesktop:
         self.brand.pack(fill="x", padx=20, pady=(22, 4))
         self.mode_label = tk.Label(self.sidebar, text="PERSONAL AGENT", anchor="w")
         self.mode_label.pack(fill="x", padx=20, pady=(0, 22))
+        self.mode_status = tk.Label(
+            self.sidebar,
+            text="MODE\nASSISTANT\n\nSESSION\nACTIVE",
+            justify="left",
+            anchor="w",
+            padx=20,
+            pady=10,
+        )
+        self.mode_status.pack(fill="x")
         self.nav_buttons = {}
         for label in ("CHAT", "MEMORY", "KNOWLEDGE", "RESEARCH", "ACTIVITY"):
             widget = tk.Button(
@@ -130,16 +172,62 @@ class AtoDesktop:
         )
         self.status.pack(side="bottom", fill="x", padx=20, pady=18)
 
+        self.right_panel = tk.Frame(self.root, width=260)
+        self.right_panel.pack(side="right", fill="y")
+        self.right_panel.pack_propagate(False)
+        self.task_heading = tk.Label(self.right_panel, text="ACTIVE TASK", anchor="w")
+        self.task_heading.pack(fill="x", padx=18, pady=(28, 6))
+        self.task_value = tk.Label(
+            self.right_panel,
+            text="Awaiting input",
+            justify="left",
+            anchor="nw",
+            wraplength=220,
+        )
+        self.task_value.pack(fill="x", padx=18, pady=(0, 22))
+        self.tool_heading = tk.Label(self.right_panel, text="TOOL CHANNEL", anchor="w")
+        self.tool_heading.pack(fill="x", padx=18, pady=(0, 6))
+        self.tool_value = tk.Label(
+            self.right_panel,
+            text="LOCKED - PERMISSION BRIDGE PENDING",
+            justify="left",
+            anchor="nw",
+            wraplength=220,
+        )
+        self.tool_value.pack(fill="x", padx=18, pady=(0, 22))
+        self.system_heading = tk.Label(self.right_panel, text="SYSTEM", anchor="w")
+        self.system_heading.pack(fill="x", padx=18, pady=(0, 6))
+        self.system_value = tk.Label(
+            self.right_panel,
+            text="\n".join(self.controller.system_snapshot()),
+            justify="left",
+            anchor="nw",
+            wraplength=220,
+        )
+        self.system_value.pack(fill="x", padx=18)
+
         self.main_panel = tk.Frame(self.root)
         self.main_panel.pack(side="left", fill="both", expand=True)
         self.header = tk.Frame(self.main_panel, height=64)
         self.header.pack(fill="x")
         self.title = tk.Label(self.header, text="Conversation", anchor="w", font=("Segoe UI", 16))
         self.title.pack(side="left", padx=20, pady=16)
+        self.settings_button = tk.Button(
+            self.header,
+            text="SETTINGS",
+            command=self._show_settings,
+            relief="flat",
+        )
+        self.settings_button.pack(side="right", padx=(0, 12), pady=12)
         self.theme_button = tk.Button(self.header, command=self._toggle_theme, relief="flat")
-        self.theme_button.pack(side="right", padx=20, pady=12)
+        self.theme_button.pack(side="right", padx=(0, 12), pady=12)
+        self.connection_label = tk.Label(self.header, text="LOCAL CORE ONLINE", padx=10, pady=5)
+        self.connection_label.pack(side="right", pady=15)
         self.lock_badge = tk.Label(self.header, text="CHAT-ONLY • TOOLS LOCKED", padx=10, pady=5)
         self.lock_badge.pack(side="right", pady=15)
+
+        self.orb = AtoOrbCanvas(self.main_panel, self.state_model, self.theme, height=340)
+        self.orb.pack(fill="x", padx=16, pady=(8, 4))
 
         self.transcript = tk.Text(
             self.main_panel,
@@ -164,20 +252,44 @@ class AtoDesktop:
             relief="flat",
         )
         self.send_button.pack(side="right", fill="y", padx=(10, 0))
+        self.microphone_button = tk.Button(
+            self.composer,
+            text="MIC LOCKED",
+            command=self._voice_locked,
+            width=11,
+            relief="flat",
+        )
+        self.microphone_button.pack(side="right", fill="y", padx=(10, 0))
+        self.current_status = tk.Label(
+            self.composer,
+            text="READY",
+            width=12,
+            anchor="center",
+        )
+        self.current_status.pack(side="right", fill="y", padx=(10, 0))
         self.transcript.pack(fill="both", expand=True, padx=16, pady=(0, 10))
 
     def _apply_theme(self) -> None:
         theme = self.theme
         self.root.configure(bg=theme.background)
         self.sidebar.configure(bg=theme.panel_alt)
+        self.right_panel.configure(bg=theme.panel_alt)
         self.main_panel.configure(bg=theme.background)
         self.header.configure(bg=theme.panel)
         self.composer.configure(bg=theme.background)
         for widget in self.sidebar.winfo_children():
             widget.configure(bg=theme.panel_alt, fg=theme.text, font=(theme.font_family, 10))
+        for widget in self.right_panel.winfo_children():
+            widget.configure(bg=theme.panel_alt, fg=theme.text, font=(theme.font_family, 9))
         self.brand.configure(font=(theme.heading_family, 22), fg=theme.accent)
         self.mode_label.configure(fg=theme.muted_text)
+        self.mode_status.configure(fg=theme.muted_text)
         self.status.configure(fg=theme.accent_secondary)
+        for heading in (self.task_heading, self.tool_heading, self.system_heading):
+            heading.configure(fg=theme.accent, font=(theme.heading_family, 10))
+        self.task_value.configure(fg=theme.text)
+        self.tool_value.configure(fg=theme.warning)
+        self.system_value.configure(fg=theme.muted_text)
         for label, button in self.nav_buttons.items():
             active = label == self._section
             button.configure(
@@ -191,6 +303,18 @@ class AtoDesktop:
         self.lock_badge.configure(
             bg=theme.panel_alt,
             fg=theme.warning,
+            font=(theme.font_family, 9),
+        )
+        self.connection_label.configure(
+            bg=theme.panel,
+            fg=theme.accent_secondary,
+            font=(theme.font_family, 9),
+        )
+        self.settings_button.configure(
+            bg=theme.panel_alt,
+            fg=theme.text,
+            activebackground=theme.border,
+            activeforeground=theme.accent,
             font=(theme.font_family, 9),
         )
         self.theme_button.configure(
@@ -240,10 +364,83 @@ class AtoDesktop:
             activeforeground=theme.background,
             font=(theme.heading_family, 10),
         )
+        self.microphone_button.configure(
+            bg=theme.panel_alt,
+            fg=theme.muted_text,
+            activebackground=theme.border,
+            activeforeground=theme.warning,
+            font=(theme.font_family, 9),
+        )
+        self.current_status.configure(
+            bg=theme.panel_alt,
+            fg=theme.accent,
+            font=(theme.heading_family, 9),
+        )
+        self.orb.set_theme(theme)
+        self._apply_layout_mode()
 
     def _toggle_theme(self) -> None:
         self.theme = alternate_theme(self.theme.id)
         self._apply_theme()
+
+    def _apply_layout_mode(self) -> None:
+        if self.theme.id is ThemeId.ATO_HUD:
+            if not self.right_panel.winfo_manager():
+                self.right_panel.pack(side="right", fill="y", before=self.main_panel)
+            if not self.orb.canvas.winfo_manager():
+                self.orb.pack(fill="x", padx=16, pady=(8, 4), before=self.transcript)
+        else:
+            self.right_panel.pack_forget()
+            self.orb.pack_forget()
+
+    def _toggle_fullscreen(self, event=None) -> str:
+        del event
+        self._fullscreen = not self._fullscreen
+        self.root.attributes("-fullscreen", self._fullscreen)
+        return "break"
+
+    def _leave_fullscreen(self, event=None) -> str:
+        del event
+        self._fullscreen = False
+        self.root.attributes("-fullscreen", False)
+        return "break"
+
+    def _show_settings(self) -> None:
+        from tkinter import messagebox
+
+        messagebox.showinfo(
+            "Ato interface settings",
+            "Theme: "
+            f"{self.theme.display_name}\n\nF11: toggle full screen\nEsc: leave full screen\n"
+            "Ctrl+Enter: send message\n\nVoice and GUI tools remain locked until their "
+            "permission bridge is enabled.",
+            parent=self.root,
+        )
+
+    def _voice_locked(self) -> None:
+        from tkinter import messagebox
+
+        messagebox.showinfo(
+            "Voice is locked",
+            "The visual LISTENING and SPEAKING states are ready, but microphone and speech "
+            "controls will activate only after GUI permission prompts are connected.",
+            parent=self.root,
+        )
+
+    def _refresh_hud(self) -> None:
+        snapshot = self.state_model.snapshot()
+        self.current_status.configure(text=snapshot.status)
+        self.task_value.configure(text=snapshot.active_task)
+        self.tool_value.configure(
+            text=snapshot.tool or "LOCKED - PERMISSION BRIDGE PENDING"
+        )
+        self.mode_status.configure(
+            text=(
+                "MODE\nASSISTANT\n\nSESSION\nACTIVE\n\n"
+                f"MESSAGES\n{len(self.controller.agent.conversation)}"
+            )
+        )
+        self.root.after(250, self._refresh_hud)
 
     def _restore_visible_history(self) -> None:
         for message in self.controller.agent.conversation[-20:]:
@@ -330,6 +527,10 @@ class AtoDesktop:
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self.state_model.transition(
+            AtoVisualState.PROCESSING if busy else AtoVisualState.IDLE,
+            active_task="Generating response" if busy else "Awaiting input",
+        )
         self.send_button.configure(state="disabled" if busy else "normal")
         if self._section == "CHAT":
             self.title.configure(text="Ato is thinking…" if busy else "Conversation")
@@ -362,7 +563,13 @@ def main() -> None:
             tools=None,
         )
         AtoDesktop(
-            DesktopChatController(agent, memory_store, long_term_memory, knowledge_store)
+            DesktopChatController(
+                agent,
+                memory_store,
+                long_term_memory,
+                knowledge_store,
+                settings.workspace_root,
+            )
         ).run()
     except (AtoError, ValueError) as exc:
         raise SystemExit(f"Unable to start Ato desktop: {exc}") from exc
