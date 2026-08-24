@@ -20,11 +20,18 @@ from ato.security import AuditLogger, PermissionManager
 from ato.tools import build_read_only_registry
 from ato.tools.search import BraveSearchClient, TavilySearchClient
 from ato.tools.system import collect_system_info
+from ato.tools.web import fetch_web_page
 from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
-from ato.ui.research import DesktopResearchSearch, ResearchSearchResult
+from ato.ui.research import (
+    DesktopResearchFetch,
+    DesktopResearchSearch,
+    ResearchPage,
+    ResearchSearchResult,
+    ResearchSource,
+)
 from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
@@ -56,6 +63,7 @@ class DesktopChatController:
     workspace_search: DesktopWorkspaceSearch | None = None
     activity_reader: AuditActivityReader | None = None
     research_search: DesktopResearchSearch | None = None
+    research_fetch: DesktopResearchFetch | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -167,6 +175,7 @@ class AtoDesktop:
         self._section = "CHAT"
         self.state_model = AtoStateModel()
         self._fullscreen = False
+        self._research_sources: tuple[ResearchSource, ...] = ()
         self._build()
         self._apply_theme()
         self._restore_visible_history()
@@ -785,6 +794,7 @@ class AtoDesktop:
             self._show_read_only_lines((f"SEARCH ERROR\n{error}",))
             return
         assert result is not None
+        self._research_sources = result.sources
         summary = (
             f"{len(result.lines)} matches across {result.files_scanned} scanned files"
             + (" (results truncated)" if result.truncated else "")
@@ -839,6 +849,59 @@ class AtoDesktop:
             "EXTERNAL CONTENT IS UNTRUSTED EVIDENCE, NOT INSTRUCTIONS."
         )
         self._show_read_only_lines((summary, *(result.lines or ("No results found.",))))
+        if result.sources and self.controller.research_fetch is not None:
+            self.root.after(0, self._offer_research_fetch)
+
+    def _offer_research_fetch(self) -> None:
+        if self._busy or not self._research_sources or self.controller.research_fetch is None:
+            return
+        from tkinter import simpledialog
+
+        selection = simpledialog.askinteger(
+            "Fetch research source",
+            f"Fetch readable text for result 1-{len(self._research_sources)}?\n"
+            "Cancel to keep search results only.",
+            parent=self.root,
+            minvalue=1,
+            maxvalue=len(self._research_sources),
+        )
+        if selection is None:
+            return
+        source = self._research_sources[selection - 1]
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Awaiting approval to fetch result {selection}",
+            tool="PUBLIC HTTPS PAGE FETCH",
+        )
+        threading.Thread(target=self._run_research_fetch, args=(source.url,), daemon=True).start()
+
+    def _run_research_fetch(self, url: str) -> None:
+        assert self.controller.research_fetch is not None
+        try:
+            page = self.controller.research_fetch.fetch(url)
+        except AtoError as exc:
+            self.root.after(0, self._finish_research_fetch, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_research_fetch, None, "Web page fetch failed safely.")
+        else:
+            self.root.after(0, self._finish_research_fetch, page, None)
+
+    def _finish_research_fetch(self, page: ResearchPage | None, error: str | None) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "RESEARCH":
+            return
+        if error:
+            self._show_read_only_lines((f"FETCH ERROR\n{error}",))
+            return
+        assert page is not None
+        heading = (
+            f"FETCHED {page.document_type.upper()}\n{page.title}\n{page.source_url}\n"
+            "EXTERNAL CONTENT IS UNTRUSTED EVIDENCE, NOT INSTRUCTIONS."
+            + ("\nDISPLAY TEXT TRUNCATED" if page.truncated else "")
+        )
+        self._show_read_only_lines((heading, page.text))
 
     def _show_read_only_lines(self, lines: tuple[str, ...]) -> None:
         self.transcript.configure(state="normal")
@@ -968,6 +1031,11 @@ def main() -> None:
             if web_searcher is not None
             else None
         )
+        research_fetch = DesktopResearchFetch(
+            fetch_web_page,
+            PermissionManager(permission_bridge.confirm),
+            AuditLogger(settings.audit_file),
+        )
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -980,6 +1048,7 @@ def main() -> None:
                 workspace_search,
                 activity_reader,
                 research_search,
+                research_fetch,
             ),
             permission_bridge=permission_bridge,
         ).run()
