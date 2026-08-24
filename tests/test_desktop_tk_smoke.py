@@ -5,6 +5,7 @@ import pytest
 from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.ui.desktop import AtoDesktop, DesktopChatController
+from ato.ui.permissions import GuiPermissionBridge
 from ato.ui.state import AtoVisualState
 from ato.ui.themes import ThemeId
 
@@ -25,7 +26,8 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     except tkinter.TclError:
         pytest.skip("Tk display is unavailable")
 
-    desktop = AtoDesktop(DesktopChatController(Agent(EchoLLM())))
+    bridge = GuiPermissionBridge()
+    desktop = AtoDesktop(DesktopChatController(Agent(EchoLLM())), permission_bridge=bridge)
     desktop.root.withdraw()
     desktop.root.update_idletasks()
     assert desktop.theme.id is ThemeId.ATO_HUD
@@ -42,4 +44,6 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     assert desktop.orb.canvas.winfo_manager() == ""
     desktop._toggle_theme()
     assert desktop.orb.canvas.winfo_manager() == "pack"
-    desktop.root.destroy()
+    assert bridge.attached is True
+    desktop._close()
+    assert bridge.attached is False
