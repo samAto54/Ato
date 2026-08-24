@@ -18,6 +18,7 @@ from ato.providers import DeepSeekProvider
 from ato.tools.system import collect_system_info
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
+from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 
@@ -106,7 +107,12 @@ class DesktopChatController:
 class AtoDesktop:
     """Tk desktop chat with switchable Standard and original Ato HUD themes."""
 
-    def __init__(self, controller: DesktopChatController, theme: ThemeId = ThemeId.ATO_HUD):
+    def __init__(
+        self,
+        controller: DesktopChatController,
+        theme: ThemeId = ThemeId.ATO_HUD,
+        permission_bridge: GuiPermissionBridge | None = None,
+    ):
         import tkinter as tk
 
         self._tk = tk
@@ -116,6 +122,10 @@ class AtoDesktop:
         self.root.title("Ato")
         self.root.geometry("1440x900")
         self.root.minsize(1024, 680)
+        self.permission_bridge = permission_bridge
+        if self.permission_bridge is not None:
+            self.permission_bridge.attach(self.root.after, self._ask_permission)
+        self.root.protocol("WM_DELETE_WINDOW", self._close)
         try:
             self.root.state("zoomed")
         except tk.TclError:
@@ -417,6 +427,25 @@ class AtoDesktop:
             parent=self.root,
         )
 
+    def _ask_permission(self, prompt: GuiPermissionPrompt) -> bool:
+        """Display one redacted tool request on Tk's UI thread."""
+        from tkinter import messagebox
+
+        return messagebox.askyesno(
+            "Ato permission request",
+            f"Tool: {prompt.tool_name}\n"
+            f"Permission: {prompt.permission}\n\n"
+            f"Arguments (secrets redacted):\n{prompt.details}\n\n"
+            "Review the requested action and its effects before allowing it.",
+            icon="warning",
+            parent=self.root,
+        )
+
+    def _close(self) -> None:
+        if self.permission_bridge is not None:
+            self.permission_bridge.detach()
+        self.root.destroy()
+
     def _voice_locked(self) -> None:
         from tkinter import messagebox
 
@@ -432,7 +461,12 @@ class AtoDesktop:
         self.current_status.configure(text=snapshot.status)
         self.task_value.configure(text=snapshot.active_task)
         self.tool_value.configure(
-            text=snapshot.tool or "LOCKED - PERMISSION BRIDGE PENDING"
+            text=snapshot.tool
+            or (
+                "PERMISSION BRIDGE READY - TOOLS LOCKED"
+                if self.permission_bridge is not None and self.permission_bridge.attached
+                else "LOCKED - PERMISSION BRIDGE UNAVAILABLE"
+            )
         )
         self.mode_status.configure(
             text=(
@@ -569,7 +603,8 @@ def main() -> None:
                 long_term_memory,
                 knowledge_store,
                 settings.workspace_root,
-            )
+            ),
+            permission_bridge=GuiPermissionBridge(),
         ).run()
     except (AtoError, ValueError) as exc:
         raise SystemExit(f"Unable to start Ato desktop: {exc}") from exc

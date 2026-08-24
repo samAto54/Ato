@@ -74,6 +74,7 @@ The current build provides:
 - Built-in Standard and original Ato HUD desktop theme palettes with an allowlisted toggle
 - A native chat-only desktop shell with persisted conversation and background model requests
 - An original full-screen Ato HUD centered on an animated, backend-driven AI visual core
+- A fail-closed, thread-safe GUI permission bridge with secret-redacted confirmation previews
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -319,6 +320,9 @@ The thread-safe visual model defines these real backend states:
 - `SPEAKING`: high-energy waveform, reserved for approved speech playback.
 
 Today the desktop automatically transitions `IDLE -> PROCESSING -> IDLE` around real chat work.
+Its permission bridge safely marshals future background tool requests onto Tk's UI thread, serializes
+prompts, redacts sensitive arguments, and denies requests on timeout, shutdown, or dialog failure.
+The bridge is attached, but desktop tools remain deliberately locked during this safety increment.
 Listening, tool execution, and speaking visuals exist in the shared state model but remain unable to
 activate from GUI controls until the permission bridge connects their actual backends. The right HUD
 shows the active task, locked tool channel, and privacy-reduced local OS/CPU/RAM data; network status
