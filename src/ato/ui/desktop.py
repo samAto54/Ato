@@ -11,13 +11,14 @@ from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
 from ato.brain.messages import Role
 from ato.brain.prompts import SYSTEM_PROMPT
+from ato.coding import SqliteEditCheckpointStore
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager
-from ato.tools import build_read_only_registry
+from ato.tools import build_phase3_registry
 from ato.tools.search import BraveSearchClient, TavilySearchClient
 from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
@@ -39,6 +40,7 @@ from ato.ui.voice_turn import DesktopVoiceTurnService
 from ato.ui.workspace import (
     DesktopWorkspaceSearch,
     WorkspaceChangePreview,
+    WorkspaceChangeResult,
     WorkspaceInspectionResult,
     WorkspaceSearchResult,
 )
@@ -47,10 +49,11 @@ from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpee
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
 
 Desktop runtime constraint: the language model has no autonomous tools. User-triggered desktop
-controls may separately perform approved voice, read-only workspace, and research actions, but you
-must never claim that you initiated them. You cannot change files, run commands, use Git, access the
-clipboard, or perform other tool actions in this runtime. Treat recollections of tool results from
-earlier turns as historical conversation, not evidence that an action is available now."""
+controls may separately perform approved voice, workspace, and research actions, but you must never
+claim that you initiated them. Only a user-reviewed exact text preview can change a file; you cannot
+run commands, mutate Git, access the clipboard, or perform other tool actions in this runtime. Treat
+recollections of tool results from earlier turns as historical conversation, not evidence that an
+action is available now."""
 
 
 @dataclass(slots=True)
@@ -703,7 +706,7 @@ class AtoDesktop:
         self.tool_value.configure(
             text=snapshot.tool
             or (
-                "READ-ONLY SEARCH READY - OTHER TOOLS LOCKED"
+                "GUARDED WORKSPACE TOOLS READY"
                 if self.controller.workspace_search is not None
                 else "PERMISSION BRIDGE READY - TOOLS LOCKED"
                 if self.permission_bridge is not None and self.permission_bridge.attached
@@ -899,10 +902,73 @@ class AtoDesktop:
             f"READ-ONLY CHANGE PREVIEW\n{preview.path}\n"
             f"ORIGINAL SHA-256  {preview.original_sha256}\n"
             f"UPDATED SHA-256   {preview.updated_sha256}\n"
-            "NO FILE WAS MODIFIED. APPLY IS NOT ENABLED."
+            "NO FILE WAS MODIFIED."
             + ("\nDIFF TRUNCATED" if preview.truncated else "")
         )
         self._show_read_only_lines((heading, preview.diff or "No visible diff."))
+        if preview.truncated:
+            self._show_read_only_lines(("APPLY DISABLED: the complete diff was not displayed.",))
+        else:
+            self.root.after(0, self._offer_change_apply, preview)
+
+    def _offer_change_apply(self, preview: WorkspaceChangePreview) -> None:
+        if self._busy or self._section != "WORKSPACE":
+            return
+        from tkinter import messagebox
+
+        proceed = messagebox.askyesno(
+            "Apply reviewed change?",
+            "Proceed to the protected HIGH-confirmation step for this exact preview?\n\n"
+            f"Path: {preview.path}\n"
+            f"Original SHA-256: {preview.original_sha256}\n\n"
+            "The change will be rejected if the file has changed since preview.",
+            icon="warning",
+            parent=self.root,
+        )
+        if not proceed:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Awaiting HIGH permission for reviewed edit",
+            tool="ATOMIC EXACT TEXT REPLACEMENT",
+        )
+        threading.Thread(target=self._run_change_apply, args=(preview,), daemon=True).start()
+
+    def _run_change_apply(self, preview: WorkspaceChangePreview) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = self.controller.workspace_search.apply_text_change(preview)
+        except AtoError as exc:
+            self.root.after(0, self._finish_change_apply, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_change_apply, None, "Text change failed safely.")
+        else:
+            self.root.after(0, self._finish_change_apply, result, None)
+
+    def _finish_change_apply(
+        self, result: WorkspaceChangeResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        if error:
+            self._show_read_only_lines((f"APPLY ERROR\n{error}",))
+            return
+        assert result is not None
+        checkpoint = (
+            f"Rollback checkpoint: #{result.checkpoint_id}"
+            if result.checkpoint_id is not None
+            else "Rollback checkpoint: unavailable"
+        )
+        self._show_read_only_lines(
+            (
+                "CHANGE APPLIED\n"
+                f"{result.path}\n{result.bytes_written} bytes\n"
+                f"Updated SHA-256: {result.updated_sha256}\n{checkpoint}",
+            )
+        )
 
     def _start_file_inspection(self, action: str, path: str) -> None:
         self._busy = True
@@ -1322,10 +1388,11 @@ def main() -> None:
             else None
         )
         workspace_search = DesktopWorkspaceSearch(
-            build_read_only_registry(
+            build_phase3_registry(
                 settings.workspace_root,
                 PermissionManager(permission_bridge.confirm),
                 AuditLogger(settings.audit_file),
+                checkpoint_store=SqliteEditCheckpointStore(settings.edit_checkpoint_file),
             )
         )
         activity_reader = AuditActivityReader(settings.audit_file)

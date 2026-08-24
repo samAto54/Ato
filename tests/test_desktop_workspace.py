@@ -2,10 +2,11 @@ import json
 
 import pytest
 
+from ato.coding import SqliteEditCheckpointStore
 from ato.exceptions import ToolError
 from ato.security import AuditLogger, PermissionManager
 from ato.tools import build_read_only_registry
-from ato.ui.workspace import DesktopWorkspaceSearch
+from ato.ui.workspace import DesktopWorkspaceSearch, WorkspaceChangePreview
 
 
 def test_desktop_workspace_search_reuses_bounded_audited_tool(tmp_path) -> None:
@@ -92,6 +93,54 @@ def test_desktop_change_preview_rejects_malformed_hashes() -> None:
 
     with pytest.raises(ToolError, match="invalid result"):
         DesktopWorkspaceSearch(Registry()).preview_text_change("module.py", "old", "new")
+
+
+def test_desktop_applies_only_exact_preview_with_high_confirmation_and_checkpoint(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\n", encoding="utf-8")
+    requests = []
+    registry = build_read_only_registry(
+        tmp_path,
+        PermissionManager(lambda request: requests.append(request) or True),
+        checkpoint_store=SqliteEditCheckpointStore(tmp_path / "data" / "checkpoints.db"),
+    )
+    service = DesktopWorkspaceSearch(registry)
+    preview = service.preview_text_change("module.py", "old", "new")
+    result = service.apply_text_change(preview)
+    assert path.read_text(encoding="utf-8") == "new\n"
+    assert requests[0].tool_name == "replace_text_in_file"
+    assert requests[0].level.value == "HIGH"
+    assert result.checkpoint_id == 1
+    assert result.updated_sha256 == preview.updated_sha256
+
+
+def test_desktop_apply_denial_and_stale_preview_never_overwrite(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\n", encoding="utf-8")
+    denied_service = DesktopWorkspaceSearch(build_read_only_registry(tmp_path))
+    denied_preview = denied_service.preview_text_change("module.py", "old", "new")
+    with pytest.raises(ToolError, match="Permission denied"):
+        denied_service.apply_text_change(denied_preview)
+    assert path.read_text(encoding="utf-8") == "old\n"
+
+    allowed = DesktopWorkspaceSearch(
+        build_read_only_registry(tmp_path, PermissionManager(lambda request: True))
+    )
+    stale_preview = allowed.preview_text_change("module.py", "old", "new")
+    path.write_text("newer work\n", encoding="utf-8")
+    with pytest.raises(ToolError, match="changed after preview"):
+        allowed.apply_text_change(stale_preview)
+    assert path.read_text(encoding="utf-8") == "newer work\n"
+
+
+def test_desktop_never_applies_truncated_preview() -> None:
+    class Registry:
+        def execute(self, *args, **kwargs):
+            pytest.fail("truncated preview must not execute")
+
+    preview = WorkspaceChangePreview("module.py", "diff", "a" * 64, "b" * 64, True, "old", "new")
+    with pytest.raises(ToolError, match="truncated"):
+        DesktopWorkspaceSearch(Registry()).apply_text_change(preview)
 
 
 @pytest.mark.parametrize("query", ["", "   ", "x" * 1_001])

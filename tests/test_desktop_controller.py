@@ -34,7 +34,8 @@ def test_desktop_policy_forbids_claims_of_unavailable_tool_use() -> None:
     policy = " ".join(DESKTOP_SYSTEM_PROMPT.split())
     assert "no autonomous tools" in policy
     assert "must never claim that you initiated them" in policy
-    assert "cannot change files" in policy
+    assert "Only a user-reviewed exact text preview can change a file" in policy
+    assert "cannot run commands, mutate Git" in policy
 
 
 def test_desktop_research_question_persists_question_not_source_text(tmp_path) -> None:
