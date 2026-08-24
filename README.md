@@ -27,6 +27,7 @@ The current build provides:
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
 - Themed Research controls for deliberate search and reviewed source fetching
+- Reusable fixed-action palette foundation shared by Memory, Knowledge, and Research
 - Complete themed Memory lifecycle controls, including bounded expiration and permanent forgetting
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
