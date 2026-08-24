@@ -1,11 +1,15 @@
 import json
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from ato.exceptions import ToolError
 from ato.security.permissions import PermissionManager
 from ato.tools import build_phase3_registry
+from ato.voice.microphone import SAMPLE_RATE, SoundDeviceRecorder
 
 
 class Recorder:
@@ -63,3 +67,20 @@ def test_microphone_duration_is_schema_bounded(tmp_path) -> None:
         registry.execute("record_microphone", {"duration_seconds": 0})
     with pytest.raises(ToolError, match="exceeds the maximum"):
         registry.execute("record_microphone", {"duration_seconds": 121})
+
+
+def test_sounddevice_recorder_reports_normalized_transient_levels(tmp_path, monkeypatch) -> None:
+    samples = np.full((SAMPLE_RATE, 1), 3_276, dtype=np.int16)
+    fake_sounddevice = SimpleNamespace(
+        rec=lambda *args, **kwargs: samples,
+        sleep=lambda milliseconds: None,
+        wait=lambda: None,
+    )
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+    levels = []
+
+    path = SoundDeviceRecorder(tmp_path).record(1, on_level=levels.append)
+
+    assert path.is_file()
+    assert levels[:-1] == pytest.approx([1.0] * 20, abs=0.01)
+    assert levels[-1] == 0.0
