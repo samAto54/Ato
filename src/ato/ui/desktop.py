@@ -38,6 +38,7 @@ from ato.ui.themes import ThemeId, alternate_theme, get_theme
 from ato.ui.voice_turn import DesktopVoiceTurnService
 from ato.ui.workspace import (
     DesktopWorkspaceSearch,
+    WorkspaceChangePreview,
     WorkspaceInspectionResult,
     WorkspaceSearchResult,
 )
@@ -745,7 +746,7 @@ class AtoDesktop:
             elif section == "WORKSPACE":
                 lines = (
                     "Choose LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, "
-                    "LINT, or TESTS. All actions are bounded; verification never applies fixes.",
+                    "LINT, TESTS, or PREVIEW. All actions are bounded; PREVIEW never writes.",
                 )
             elif section == "RESEARCH":
                 lines = (
@@ -777,12 +778,15 @@ class AtoDesktop:
         action = simpledialog.askstring(
             "Inspect workspace",
             "Action: LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or "
-            "TESTS",
+            "TESTS, or PREVIEW",
             parent=self.root,
         )
         if action is None or not action.strip():
             return
         normalized = action.strip().casefold()
+        if normalized == "preview":
+            self._start_change_preview_dialog()
+            return
         if normalized in {"list", "read"}:
             prompt = (
                 "Relative directory path (blank for project root):"
@@ -829,6 +833,76 @@ class AtoDesktop:
             tool="READ-ONLY FILE SEARCH",
         )
         threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _start_change_preview_dialog(self) -> None:
+        from tkinter import simpledialog
+
+        path = simpledialog.askstring(
+            "Preview exact text change",
+            "Relative text file path:",
+            parent=self.root,
+        )
+        if path is None or not path.strip():
+            return
+        old_text = simpledialog.askstring(
+            "Preview exact text change",
+            "Exact existing text (must occur once):",
+            parent=self.root,
+        )
+        if old_text is None or not old_text:
+            return
+        new_text = simpledialog.askstring(
+            "Preview exact text change",
+            "Replacement text (blank deletes the exact match):",
+            parent=self.root,
+        )
+        if new_text is None:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Generating read-only exact-change preview",
+            tool="READ-ONLY CHANGE PREVIEW",
+        )
+        threading.Thread(
+            target=self._run_change_preview,
+            args=(path, old_text, new_text),
+            daemon=True,
+        ).start()
+
+    def _run_change_preview(self, path: str, old_text: str, new_text: str) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            preview = self.controller.workspace_search.preview_text_change(
+                path, old_text, new_text
+            )
+        except AtoError as exc:
+            self.root.after(0, self._finish_change_preview, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_change_preview, None, "Change preview failed safely.")
+        else:
+            self.root.after(0, self._finish_change_preview, preview, None)
+
+    def _finish_change_preview(
+        self, preview: WorkspaceChangePreview | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"PREVIEW ERROR\n{error}",))
+            return
+        assert preview is not None
+        heading = (
+            f"READ-ONLY CHANGE PREVIEW\n{preview.path}\n"
+            f"ORIGINAL SHA-256  {preview.original_sha256}\n"
+            f"UPDATED SHA-256   {preview.updated_sha256}\n"
+            "NO FILE WAS MODIFIED. APPLY IS NOT ENABLED."
+            + ("\nDIFF TRUNCATED" if preview.truncated else "")
+        )
+        self._show_read_only_lines((heading, preview.diff or "No visible diff."))
 
     def _start_file_inspection(self, action: str, path: str) -> None:
         self._busy = True

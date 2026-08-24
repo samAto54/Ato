@@ -57,6 +57,43 @@ def test_desktop_file_listing_rejects_malformed_result() -> None:
         DesktopWorkspaceSearch(Registry()).list_files(".")
 
 
+def test_desktop_change_preview_returns_diff_without_writing(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("value = 1\n", encoding="utf-8")
+    service = DesktopWorkspaceSearch(build_read_only_registry(tmp_path))
+    preview = service.preview_text_change("module.py", "value = 1", "value = 2")
+    assert "-value = 1" in preview.diff
+    assert "+value = 2" in preview.diff
+    assert len(preview.original_sha256) == 64
+    assert len(preview.updated_sha256) == 64
+    assert path.read_text(encoding="utf-8") == "value = 1\n"
+
+
+def test_desktop_change_preview_requires_one_unique_match(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("same\nsame\n", encoding="utf-8")
+    service = DesktopWorkspaceSearch(build_read_only_registry(tmp_path))
+    with pytest.raises(ToolError, match="exactly once"):
+        service.preview_text_change("module.py", "same", "changed")
+
+
+def test_desktop_change_preview_rejects_malformed_hashes() -> None:
+    class Registry:
+        def execute(self, *args, **kwargs):
+            return json.dumps(
+                {
+                    "path": "module.py",
+                    "original_sha256": "bad",
+                    "updated_sha256": "bad",
+                    "diff": "diff",
+                    "diff_truncated": False,
+                }
+            )
+
+    with pytest.raises(ToolError, match="invalid result"):
+        DesktopWorkspaceSearch(Registry()).preview_text_change("module.py", "old", "new")
+
+
 @pytest.mark.parametrize("query", ["", "   ", "x" * 1_001])
 def test_desktop_workspace_search_validates_query_before_execution(query) -> None:
     class Registry:
