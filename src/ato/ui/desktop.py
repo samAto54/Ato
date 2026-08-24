@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -85,6 +86,15 @@ class DesktopChatController:
         if self.memory_store is not None:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
         return reply
+
+    def submit_stream(self, text: str) -> Iterator[str]:
+        """Stream one turn and persist it only after successful completion."""
+        cleaned = text.strip()
+        if not cleaned:
+            raise ValueError("Message cannot be empty.")
+        yield from self.agent.respond_stream(cleaned)
+        if self.memory_store is not None:
+            self.memory_store.save_context(self.agent.conversation, self.agent.summary)
 
     def latest_assistant_reply(self) -> str | None:
         return next(
@@ -204,6 +214,9 @@ class AtoDesktop:
         self._workspace_palette: WorkspaceActionPalette | None = None
         self._settings_dialog: SettingsDialog | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
+        self._stream_fragments: list[str] = []
+        self._stream_start = "ato_stream_start"
+        self._stream_visible = False
         self._build()
         self._apply_theme()
         self._restore_visible_history()
@@ -720,6 +733,7 @@ class AtoDesktop:
             self._append(message.role.value.title(), message.content)
 
     def _show_section(self, section: str) -> None:
+        self._stream_visible = False
         self._section = section
         self._clear_transcript()
         if section == "CHAT":
@@ -1416,21 +1430,52 @@ class AtoDesktop:
         self.input.delete("1.0", "end")
         self._append("You", text)
         self._set_busy(True)
+        self._begin_stream_response()
         threading.Thread(target=self._request_reply, args=(text,), daemon=True).start()
+
+    def _begin_stream_response(self) -> None:
+        self._stream_fragments.clear()
+        self._stream_visible = self._section == "CHAT"
+        if not self._stream_visible:
+            return
+        self.transcript.configure(state="normal")
+        self.transcript.mark_set(self._stream_start, "end-1c")
+        self.transcript.mark_gravity(self._stream_start, "left")
+        self.transcript.insert("end", "ATO\n", "role_ato")
+        self.transcript.configure(state="disabled")
+        self.transcript.see("end")
 
     def _request_reply(self, text: str) -> None:
         try:
-            reply = self.controller.submit(text)
+            for fragment in self.controller.submit_stream(text):
+                self.root.after(0, self._append_stream_fragment, fragment)
         except AtoError as exc:
-            self.root.after(0, self._finish_request, None, str(exc))
+            self.root.after(0, self._finish_stream_request, str(exc))
         except Exception:
-            self.root.after(0, self._finish_request, None, "Ato encountered an unexpected error.")
+            self.root.after(
+                0, self._finish_stream_request, "Ato encountered an unexpected error."
+            )
         else:
-            self.root.after(0, self._finish_request, reply, None)
+            self.root.after(0, self._finish_stream_request, None)
 
-    def _finish_request(self, reply: str | None, error: str | None) -> None:
+    def _append_stream_fragment(self, fragment: str) -> None:
+        self._stream_fragments.append(fragment)
+        if self._stream_visible and self._section == "CHAT":
+            self.transcript.configure(state="normal")
+            self.transcript.insert("end", fragment, ChatStyle.BODY.value)
+            self.transcript.configure(state="disabled")
+            self.transcript.see("end")
+
+    def _finish_stream_request(self, error: str | None) -> None:
+        reply = "".join(self._stream_fragments).strip()
         if self._section == "CHAT":
-            self._append("Ato" if reply is not None else "Error", reply or error or "Unknown error")
+            if self._stream_visible:
+                self.transcript.configure(state="normal")
+                self.transcript.delete(self._stream_start, "end")
+                self.transcript.configure(state="disabled")
+            self._append("Error" if error else "Ato", error or reply or "Unknown error")
+        self._stream_fragments.clear()
+        self._stream_visible = False
         self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:

@@ -19,6 +19,7 @@ The current build provides:
 - Explicit `/copy-last` transfer of the latest reply through guarded write-only clipboard support
 - HIGH-confirmation, non-overwriting plain-text export of bounded recent conversation history
 - Incremental streaming responses in the terminal
+- Incremental streaming responses in the desktop HUD
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -311,6 +312,8 @@ Model requests run off the Tk event loop so the window remains responsive. A thr
 bridge protects the narrowly enabled voice, workspace-search, and research controls. The language
 model itself receives no autonomous desktop tools. Only exact, fully reviewed text replacements can
 mutate files; commands, Git mutation, and other capabilities remain confined to the terminal.
+Desktop replies stream into the transcript as provider fragments arrive, then receive the inert
+formatter after completion. Conversation memory is saved only when the full stream succeeds.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.

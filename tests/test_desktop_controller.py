@@ -16,6 +16,26 @@ class EchoLLM:
         return f"Echo: {messages[-1].content}"
 
 
+class StreamingLLM:
+    def generate(self, messages, tools=None):
+        raise AssertionError("streaming should be used")
+
+    def stream(self, messages, tools=None):
+        del messages, tools
+        yield "Hello"
+        yield " from Ato"
+
+
+class FailingStreamingLLM:
+    def generate(self, messages, tools=None):
+        raise AssertionError("streaming should be used")
+
+    def stream(self, messages, tools=None):
+        del messages, tools
+        yield "partial"
+        raise RuntimeError("stream failed")
+
+
 def test_desktop_controller_uses_agent_core_and_persists_turn(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     controller = DesktopChatController(Agent(EchoLLM()), store)
@@ -28,6 +48,32 @@ def test_desktop_controller_rejects_empty_message() -> None:
     controller = DesktopChatController(Agent(EchoLLM()))
     with pytest.raises(ValueError, match="empty"):
         controller.submit("   ")
+
+
+def test_desktop_controller_streams_and_persists_completed_turn(tmp_path) -> None:
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    controller = DesktopChatController(Agent(StreamingLLM()), store)
+
+    assert list(controller.submit_stream(" hello ")) == ["Hello", " from Ato"]
+    assert [message.content for message in store.load_history()] == ["hello", "Hello from Ato"]
+
+
+def test_desktop_controller_rejects_empty_stream_message() -> None:
+    controller = DesktopChatController(Agent(StreamingLLM()))
+
+    with pytest.raises(ValueError, match="empty"):
+        list(controller.submit_stream("   "))
+
+
+def test_desktop_controller_does_not_persist_failed_stream(tmp_path) -> None:
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    controller = DesktopChatController(Agent(FailingStreamingLLM()), store)
+
+    with pytest.raises(RuntimeError, match="stream failed"):
+        list(controller.submit_stream("hello"))
+
+    assert store.load_history() == ()
+    assert controller.agent.conversation == ()
 
 
 def test_desktop_policy_forbids_claims_of_unavailable_tool_use() -> None:
