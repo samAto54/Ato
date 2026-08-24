@@ -23,6 +23,7 @@ The current build provides:
 - Incremental streaming responses in the desktop HUD
 - Cooperative desktop response cancellation with partial-output discard
 - Confirmed desktop New Chat control that retains long-term memory and knowledge
+- Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -339,6 +340,9 @@ HIGH confirmation. Verification output is bounded and failed checks are reported
 Selecting Workspace opens a themed command matrix grouped into Files, Git Inspection, Verify, and
 Edit & Recovery. Every action displays its permission level, so no action name or arbitrary command
 must be typed.
+Opening Knowledge can import one explicitly selected workspace document after HIGH-risk consent.
+Parsing and indexing run off the UI thread; existing size, format, path, symlink, archive-expansion,
+and secret-detection rules remain authoritative. Files outside the configured workspace are refused.
 The PREVIEW action validates one exact unique text match and displays a bounded unified diff plus
 original and proposed SHA-256 fingerprints. A complete preview can proceed to a separate HIGH
 confirmation; Ato reuses the exact reviewed values, rejects stale files, writes atomically, and

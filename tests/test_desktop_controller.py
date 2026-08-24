@@ -4,6 +4,7 @@ import pytest
 
 from ato.brain.agent import Agent
 from ato.brain.messages import Message
+from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.ui.desktop import (
@@ -171,6 +172,28 @@ def test_desktop_controller_exposes_bounded_read_only_sidebar_snapshots(tmp_path
         "#1  PREFERENCE  ACTIVE\nUse cyan for the Ato HUD.",
     )
     assert controller.knowledge_snapshot() == ("#1  guide.md\n1 indexed chunks",)
+
+
+def test_desktop_controller_ingests_with_existing_knowledge_boundaries(tmp_path) -> None:
+    (tmp_path / "manual.md").write_text("Ato desktop knowledge import.", encoding="utf-8")
+    knowledge = SqliteKnowledgeStore(tmp_path / "knowledge.db", tmp_path)
+    controller = DesktopChatController(
+        Agent(EchoLLM()),
+        knowledge_store=knowledge,
+        workspace_root=tmp_path,
+    )
+
+    document = controller.ingest_knowledge("manual.md")
+
+    assert document.path == "manual.md"
+    assert document.chunks == 1
+
+
+def test_desktop_controller_reports_unconfigured_knowledge_import() -> None:
+    controller = DesktopChatController(Agent(EchoLLM()))
+
+    with pytest.raises(AtoError, match="not configured"):
+        controller.ingest_knowledge("manual.md")
 
 
 def test_desktop_system_snapshot_is_local_and_does_not_probe_network(tmp_path) -> None:

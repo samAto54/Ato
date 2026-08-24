@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -15,7 +16,7 @@ from ato.brain.prompts import SYSTEM_PROMPT
 from ato.coding import SqliteEditCheckpointStore
 from ato.config import Settings
 from ato.exceptions import AtoError
-from ato.knowledge import SqliteKnowledgeStore
+from ato.knowledge import DocumentRecord, SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager
@@ -177,6 +178,11 @@ class DesktopChatController:
             f"#{document.id}  {document.path}\n{document.chunks} indexed chunks"
             for document in documents
         )
+
+    def ingest_knowledge(self, relative_path: str) -> DocumentRecord:
+        if self.knowledge_store is None:
+            raise AtoError("Knowledge storage is not configured.")
+        return self.knowledge_store.ingest(relative_path)
 
     def system_snapshot(self) -> tuple[str, ...]:
         if self.workspace_root is None:
@@ -881,9 +887,101 @@ class AtoDesktop:
             self._show_read_only_lines(lines)
             if section == "WORKSPACE":
                 self.root.after(0, self._start_workspace_search)
+            elif section == "KNOWLEDGE" and self.controller.knowledge_store is not None:
+                self.root.after(0, self._start_knowledge_import)
             elif section == "RESEARCH" and self.controller.research_search is not None:
                 self.root.after(0, self._start_research_search)
         self._apply_theme()
+
+    def _start_knowledge_import(self) -> None:
+        if (
+            self._busy
+            or self.controller.knowledge_store is None
+            or self.controller.workspace_root is None
+        ):
+            return
+        from tkinter import filedialog, messagebox
+
+        selected = filedialog.askopenfilename(
+            title="Import Ato knowledge document",
+            initialdir=self.controller.workspace_root,
+            filetypes=(
+                ("Supported documents", "*.txt *.md *.csv *.json *.py *.pdf *.docx"),
+                ("All files", "*.*"),
+            ),
+            parent=self.root,
+        )
+        if not selected:
+            return
+        try:
+            relative = (
+                Path(selected)
+                .resolve(strict=True)
+                .relative_to(self.controller.workspace_root.resolve())
+                .as_posix()
+            )
+        except (OSError, ValueError):
+            messagebox.showerror(
+                "Knowledge import",
+                "Select an existing document inside the configured Ato workspace.",
+                parent=self.root,
+            )
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "ingest_knowledge_document",
+                "HIGH",
+                json.dumps(
+                    {
+                        "path": relative,
+                        "effect": "Index local excerpts for future model context",
+                    },
+                    indent=2,
+                ),
+            ),
+        )
+        if not approved:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Indexing {relative[:60]}",
+            tool="LOCAL KNOWLEDGE INGESTION",
+        )
+        threading.Thread(target=self._run_knowledge_import, args=(relative,), daemon=True).start()
+
+    def _run_knowledge_import(self, relative_path: str) -> None:
+        try:
+            document = self.controller.ingest_knowledge(relative_path)
+        except AtoError as exc:
+            self.root.after(0, self._finish_knowledge_import, None, str(exc))
+        except Exception:
+            self.root.after(
+                0, self._finish_knowledge_import, None, "Knowledge import failed safely."
+            )
+        else:
+            self.root.after(0, self._finish_knowledge_import, document, None)
+
+    def _finish_knowledge_import(
+        self, document: DocumentRecord | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "KNOWLEDGE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"IMPORT ERROR\n{error}",))
+            return
+        assert document is not None
+        self._show_read_only_lines(
+            (
+                f"IMPORTED\n#{document.id}  {document.path}\n{document.chunks} indexed chunks",
+                *self.controller.knowledge_snapshot(),
+            )
+        )
 
     def _clear_transcript(self) -> None:
         self.transcript.configure(state="normal")
