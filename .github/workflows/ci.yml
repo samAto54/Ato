@@ -1,0 +1,31 @@
+name: Ato CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install development dependencies
+        run: python -m pip install -e ".[dev]" build
+      - name: Test
+        run: python -m pytest -p no:cacheprovider
+      - name: Lint
+        run: python -m ruff check .
+      - name: Validate source release metadata
+        run: python scripts/validate_release.py
+      - name: Build wheel
+        run: python -m build --wheel
+      - name: Validate built wheel
+        shell: pwsh
+        run: |
+          $wheel = Get-ChildItem dist\*.whl | Select-Object -First 1 -ExpandProperty FullName
+          python scripts/validate_release.py --wheel $wheel

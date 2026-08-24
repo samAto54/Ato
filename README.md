@@ -442,9 +442,12 @@ not speak replies automatically, and the command reports an error when no assist
 ```powershell
 python -m pytest
 python -m ruff check .
+python scripts/validate_release.py
 ```
 
 The tests use fake or mocked providers and do not consume API credits.
+GitHub Actions repeats these checks on Windows, builds the wheel, and verifies that every Ato module
+plus the `ato` and `ato-gui` entry points are present in the release artifact.
 
 ## Phase 5 research safety
 
