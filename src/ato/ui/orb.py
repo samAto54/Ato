@@ -80,8 +80,11 @@ class AtoOrbCanvas:
         canvas.delete("all")
         canvas.configure(bg=theme.background)
 
+        self._draw_field(cx, cy, radius, elapsed, profile)
         self._draw_particles(cx, cy, radius, elapsed, profile)
+        self._draw_orbit_planes(cx, cy, radius, elapsed, profile)
         self._draw_rings(cx, cy, radius, elapsed, profile)
+        self._draw_energy_lattice(cx, cy, radius, elapsed, profile)
         self._draw_core(cx, cy, radius, elapsed, profile)
         if profile.waveform:
             self._draw_waveform(cx, cy, radius, elapsed, profile)
@@ -94,6 +97,46 @@ class AtoOrbCanvas:
             fill=theme.accent,
             font=(theme.heading_family, 11),
         )
+        canvas.create_text(
+            cx,
+            cy - radius - 38,
+            text=f"ATO CORE  //  {snapshot.state.value.upper()}",
+            fill=_mix(theme.background, theme.muted_text, 0.72),
+            font=(theme.font_family, 8),
+        )
+
+    def _draw_field(
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+    ) -> None:
+        color = _mix(self.theme.background, self.theme.accent, 0.1 + profile.energy * 0.04)
+        span = radius * 2.5
+        self.canvas.create_line(cx - span, cy, cx + span, cy, fill=color, dash=(2, 12))
+        self.canvas.create_line(
+            cx, cy - span * 0.55, cx, cy + span * 0.55, fill=color, dash=(2, 12)
+        )
+        for scale in (1.04, 1.88, 2.38):
+            ring = radius * scale
+            self.canvas.create_oval(
+                cx - ring,
+                cy - ring * 0.58,
+                cx + ring,
+                cy + ring * 0.58,
+                outline=color,
+                width=1,
+                dash=(1, 9),
+            )
+        sweep = elapsed * profile.speed * 18
+        self.canvas.create_arc(
+            cx - radius * 2.5,
+            cy - radius * 1.45,
+            cx + radius * 2.5,
+            cy + radius * 1.45,
+            start=sweep,
+            extent=24 + profile.energy * 20,
+            style="arc",
+            outline=_mix(self.theme.background, self.theme.accent_secondary, 0.4),
+            width=1,
+        )
 
     def _draw_particles(
         self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
@@ -105,7 +148,55 @@ class AtoOrbCanvas:
             y = cy + math.sin(angle) * distance * 0.58
             size = 1 + (index % 3) * 0.45 * profile.energy
             color = self.theme.accent if index % 4 else self.theme.accent_secondary
+            trail_angle = angle - profile.speed * 0.13
+            trail_x = cx + math.cos(trail_angle) * distance
+            trail_y = cy + math.sin(trail_angle) * distance * 0.58
+            self.canvas.create_line(
+                trail_x,
+                trail_y,
+                x,
+                y,
+                fill=_mix(self.theme.background, color, 0.28 + profile.energy * 0.12),
+                width=1,
+            )
             self.canvas.create_oval(x - size, y - size, x + size, y + size, fill=color, outline="")
+
+    def _draw_orbit_planes(
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+    ) -> None:
+        for index, (scale, flattening, tilt) in enumerate(
+            ((1.18, 0.28, 0.0), (1.45, 0.42, math.pi / 3), (1.72, 0.2, -math.pi / 4))
+        ):
+            phase = elapsed * profile.speed * (0.42 + index * 0.13) * (-1 if index == 1 else 1)
+            points: list[float] = []
+            for step in range(65):
+                angle = step / 64 * math.tau
+                x = math.cos(angle) * radius * scale
+                y = math.sin(angle) * radius * scale * flattening
+                rotated_x = x * math.cos(tilt) - y * math.sin(tilt)
+                rotated_y = x * math.sin(tilt) + y * math.cos(tilt)
+                points.extend((cx + rotated_x, cy + rotated_y))
+            self.canvas.create_line(
+                *points,
+                fill=_mix(self.theme.background, self.theme.accent, 0.2 + index * 0.06),
+                width=1,
+                smooth=True,
+            )
+            node_angle = phase + index * 1.7
+            node_x = math.cos(node_angle) * radius * scale
+            node_y = math.sin(node_angle) * radius * scale * flattening
+            x = cx + node_x * math.cos(tilt) - node_y * math.sin(tilt)
+            y = cy + node_x * math.sin(tilt) + node_y * math.cos(tilt)
+            size = 2.2 + profile.energy * 1.8
+            self.canvas.create_oval(
+                x - size,
+                y - size,
+                x + size,
+                y + size,
+                fill=self.theme.accent_secondary,
+                outline=self.theme.text,
+                width=1,
+            )
 
     def _draw_rings(
         self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
@@ -136,6 +227,58 @@ class AtoOrbCanvas:
                     outline=color,
                     width=1 + (index == 0),
                 )
+        tick_radius = radius * 2.02
+        tick_phase = elapsed * profile.speed * 0.12
+        for index in range(48):
+            angle = index / 48 * math.tau + tick_phase
+            outer = tick_radius * (1.02 if index % 4 else 1.07)
+            inner = tick_radius * (0.98 if index % 4 else 0.93)
+            x1, y1 = _ellipse_point(cx, cy, inner, inner * 0.64, angle)
+            x2, y2 = _ellipse_point(cx, cy, outer, outer * 0.64, angle)
+            self.canvas.create_line(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill=(
+                    self.theme.accent_secondary
+                    if index % 12 == 0
+                    else _mix(self.theme.background, self.theme.accent, 0.48)
+                ),
+                width=2 if index % 12 == 0 else 1,
+            )
+
+    def _draw_energy_lattice(
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+    ) -> None:
+        phase = elapsed * profile.speed * 0.7
+        spoke_color = _mix(self.theme.background, self.theme.accent, 0.28 + profile.energy * 0.1)
+        for index in range(12):
+            angle = index / 12 * math.tau + phase
+            inner = radius * (0.34 + (index % 3) * 0.05)
+            outer = radius * (0.82 + (index % 2) * 0.1)
+            x1 = cx + math.cos(angle) * inner
+            y1 = cy + math.sin(angle) * inner
+            bend = angle + math.sin(elapsed * 1.7 + index) * 0.12
+            x2 = cx + math.cos(bend) * outer
+            y2 = cy + math.sin(bend) * outer
+            self.canvas.create_line(x1, y1, x2, y2, fill=spoke_color, width=1)
+        polygon: list[float] = []
+        sides = 8
+        for index in range(sides):
+            angle = index / sides * math.tau - phase * 0.75
+            polygon.extend(
+                (
+                    cx + math.cos(angle) * radius * 0.72,
+                    cy + math.sin(angle) * radius * 0.72,
+                )
+            )
+        self.canvas.create_polygon(
+            *polygon,
+            fill="",
+            outline=_mix(self.theme.background, self.theme.accent_secondary, 0.38),
+            width=1,
+        )
 
     def _draw_core(
         self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
@@ -152,6 +295,19 @@ class AtoOrbCanvas:
                 cy + ring,
                 fill=color,
                 outline="",
+            )
+        shell = radius * 0.82
+        for offset in (0, 120, 240):
+            self.canvas.create_arc(
+                cx - shell,
+                cy - shell,
+                cx + shell,
+                cy + shell,
+                start=elapsed * profile.speed * 55 + offset,
+                extent=58 + profile.energy * 18,
+                style="arc",
+                outline=_mix(self.theme.accent, "#FFFFFF", 0.2),
+                width=2,
             )
         inner = radius * (0.26 + math.sin(elapsed * 3.1) * 0.025)
         self.canvas.create_oval(
@@ -192,6 +348,22 @@ class AtoOrbCanvas:
             fill=self.theme.accent_secondary,
             width=1,
         )
+        glow = _mix(self.theme.background, self.theme.accent_secondary, 0.16)
+        for distance in (5, 10, 16):
+            self.canvas.create_line(
+                cx - half,
+                cy + offset + distance,
+                cx + half,
+                cy + offset + distance,
+                fill=glow,
+                width=1,
+            )
+
+
+def _ellipse_point(
+    cx: float, cy: float, radius_x: float, radius_y: float, angle: float
+) -> tuple[float, float]:
+    return cx + math.cos(angle) * radius_x, cy + math.sin(angle) * radius_y
 
 
 def _mix(first: str, second: str, amount: float) -> str:
