@@ -6,7 +6,7 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
-from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController
+from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController, DesktopStreamCancelled
 from ato.ui.research import ResearchPage
 
 
@@ -71,6 +71,26 @@ def test_desktop_controller_does_not_persist_failed_stream(tmp_path) -> None:
 
     with pytest.raises(RuntimeError, match="stream failed"):
         list(controller.submit_stream("hello"))
+
+    assert store.load_history() == ()
+    assert controller.agent.conversation == ()
+
+
+def test_desktop_controller_cancels_without_persisting_partial_stream(tmp_path) -> None:
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    controller = DesktopChatController(Agent(StreamingLLM()), store)
+    checks = 0
+
+    def cancel_after_first_fragment() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    fragments = controller.submit_stream("hello", cancel_after_first_fragment)
+    assert next(fragments) == "Hello"
+
+    with pytest.raises(DesktopStreamCancelled, match="stopped"):
+        next(fragments)
 
     assert store.load_history() == ()
     assert controller.agent.conversation == ()

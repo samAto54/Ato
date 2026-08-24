@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +62,10 @@ recollections of tool results from earlier turns as historical conversation, not
 action is available now."""
 
 
+class DesktopStreamCancelled(AtoError):
+    """Raised when the user cooperatively stops one desktop response stream."""
+
+
 @dataclass(slots=True)
 class DesktopChatController:
     """Small synchronous adapter kept independent from Tk for deterministic tests."""
@@ -87,12 +91,26 @@ class DesktopChatController:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
         return reply
 
-    def submit_stream(self, text: str) -> Iterator[str]:
+    def submit_stream(
+        self, text: str, cancel_requested: Callable[[], bool] | None = None
+    ) -> Iterator[str]:
         """Stream one turn and persist it only after successful completion."""
         cleaned = text.strip()
         if not cleaned:
             raise ValueError("Message cannot be empty.")
-        yield from self.agent.respond_stream(cleaned)
+        stream = self.agent.respond_stream(cleaned)
+        while True:
+            if cancel_requested is not None and cancel_requested():
+                stream.close()
+                raise DesktopStreamCancelled("Response stopped by user.")
+            try:
+                fragment = next(stream)
+            except StopIteration:
+                break
+            if cancel_requested is not None and cancel_requested():
+                stream.close()
+                raise DesktopStreamCancelled("Response stopped by user.")
+            yield fragment
         if self.memory_store is not None:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
 
@@ -217,6 +235,8 @@ class AtoDesktop:
         self._stream_fragments: list[str] = []
         self._stream_start = "ato_stream_start"
         self._stream_visible = False
+        self._stream_active = False
+        self._stream_cancel = threading.Event()
         self._build()
         self._apply_theme()
         self._restore_visible_history()
@@ -1425,6 +1445,9 @@ class AtoDesktop:
 
     def _submit(self) -> None:
         text = self.input.get("1.0", "end").strip()
+        if self._stream_active:
+            self._cancel_stream()
+            return
         if self._busy or not text:
             return
         self.input.delete("1.0", "end")
@@ -1435,6 +1458,9 @@ class AtoDesktop:
 
     def _begin_stream_response(self) -> None:
         self._stream_fragments.clear()
+        self._stream_cancel.clear()
+        self._stream_active = True
+        self.send_button.configure(text="STOP", state="normal")
         self._stream_visible = self._section == "CHAT"
         if not self._stream_visible:
             return
@@ -1447,16 +1473,29 @@ class AtoDesktop:
 
     def _request_reply(self, text: str) -> None:
         try:
-            for fragment in self.controller.submit_stream(text):
+            for fragment in self.controller.submit_stream(text, self._stream_cancel.is_set):
                 self.root.after(0, self._append_stream_fragment, fragment)
+        except DesktopStreamCancelled:
+            self.root.after(0, self._finish_stream_request, None, True)
         except AtoError as exc:
-            self.root.after(0, self._finish_stream_request, str(exc))
+            self.root.after(0, self._finish_stream_request, str(exc), False)
         except Exception:
             self.root.after(
-                0, self._finish_stream_request, "Ato encountered an unexpected error."
+                0,
+                self._finish_stream_request,
+                "Ato encountered an unexpected error.",
+                False,
             )
         else:
-            self.root.after(0, self._finish_stream_request, None)
+            self.root.after(0, self._finish_stream_request, None, False)
+
+    def _cancel_stream(self) -> None:
+        self._stream_cancel.set()
+        self.send_button.configure(text="STOPPING...", state="disabled")
+        self.state_model.transition(
+            AtoVisualState.PROCESSING,
+            active_task="Stopping response safely",
+        )
 
     def _append_stream_fragment(self, fragment: str) -> None:
         self._stream_fragments.append(fragment)
@@ -1466,16 +1505,21 @@ class AtoDesktop:
             self.transcript.configure(state="disabled")
             self.transcript.see("end")
 
-    def _finish_stream_request(self, error: str | None) -> None:
+    def _finish_stream_request(self, error: str | None, cancelled: bool) -> None:
         reply = "".join(self._stream_fragments).strip()
         if self._section == "CHAT":
             if self._stream_visible:
                 self.transcript.configure(state="normal")
                 self.transcript.delete(self._stream_start, "end")
                 self.transcript.configure(state="disabled")
-            self._append("Error" if error else "Ato", error or reply or "Unknown error")
+            if cancelled:
+                self._append("System", "Response stopped. Partial output was discarded.")
+            else:
+                self._append("Error" if error else "Ato", error or reply or "Unknown error")
         self._stream_fragments.clear()
         self._stream_visible = False
+        self._stream_active = False
+        self._stream_cancel.clear()
         self._set_busy(False)
 
     def _set_busy(self, busy: bool) -> None:
@@ -1484,7 +1528,10 @@ class AtoDesktop:
             AtoVisualState.PROCESSING if busy else AtoVisualState.IDLE,
             active_task="Generating response" if busy else "Awaiting input",
         )
-        self.send_button.configure(state="disabled" if busy else "normal")
+        self.send_button.configure(
+            text="STOP" if self._stream_active else "SEND",
+            state="normal" if self._stream_active or not busy else "disabled",
+        )
         if self._section == "CHAT":
             self.title.configure(text="Ato is thinking…" if busy else "Conversation")
 
