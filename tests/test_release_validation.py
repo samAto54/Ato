@@ -31,7 +31,10 @@ def test_release_validator_checks_wheel_modules_metadata_and_scripts(tmp_path) -
         )
         archive.writestr(
             "ato_agent-0.1.0.dist-info/entry_points.txt",
-            "[console_scripts]\nato = ato.main:main\nato-gui = ato.ui.desktop:main\n",
+            "[console_scripts]\n"
+            "ato = ato.main:main\n"
+            "ato-gui = ato.ui.desktop:main\n"
+            "ato-doctor = ato.doctor:main\n",
         )
 
     MODULE.validate_wheel(wheel, version, files)

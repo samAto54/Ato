@@ -314,6 +314,16 @@ Run the first native desktop interface after installing the package:
 ato-gui
 ```
 
+Before launching, run the offline readiness doctor when setup or optional features are uncertain:
+
+```powershell
+ato-doctor
+```
+
+It checks Python, required packages, Tkinter, validated configuration, workspace availability,
+optional web search, and enabled voice dependencies. It performs no network requests and reports
+only whether secrets are configured—never their values.
+
 On Windows, double-click `start-ato.cmd` in the project root to launch the desktop without opening
 VS Code or keeping a terminal window visible. The launcher resolves this project folder dynamically,
 uses `.venv\Scripts\pythonw.exe`, and contains no API keys or machine-specific absolute paths.

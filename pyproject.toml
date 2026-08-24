@@ -23,6 +23,7 @@ stt = ["faster-whisper>=1.1"]
 [project.scripts]
 ato = "ato.main:main"
 ato-gui = "ato.ui.desktop:main"
+ato-doctor = "ato.doctor:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ato"]
