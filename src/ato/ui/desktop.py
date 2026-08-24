@@ -115,6 +115,12 @@ class DesktopChatController:
         if self.memory_store is not None:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
 
+    def clear_recent_conversation(self) -> None:
+        """Clear persisted recent chat and active context, retaining long-term memory."""
+        if self.memory_store is not None:
+            self.memory_store.clear()
+        self.agent.clear_conversation()
+
     def latest_assistant_reply(self) -> str | None:
         return next(
             (
@@ -352,6 +358,13 @@ class AtoDesktop:
             relief="flat",
         )
         self.settings_button.pack(side="right", padx=(0, 12), pady=12)
+        self.new_chat_button = tk.Button(
+            self.header,
+            text="NEW CHAT",
+            command=self._start_new_conversation,
+            relief="flat",
+        )
+        self.new_chat_button.pack(side="right", padx=(0, 12), pady=12)
         self.theme_button = tk.Button(self.header, command=self._toggle_theme, relief="flat")
         self.theme_button.pack(side="right", padx=(0, 12), pady=12)
         self.connection_label = tk.Label(self.header, text="LOCAL CORE ONLINE", padx=10, pady=5)
@@ -474,6 +487,13 @@ class AtoDesktop:
             activeforeground=theme.accent,
             font=(theme.font_family, 9),
         )
+        self.new_chat_button.configure(
+            bg=theme.panel_alt,
+            fg=theme.warning,
+            activebackground=theme.border,
+            activeforeground=theme.text,
+            font=(theme.font_family, 9),
+        )
         self.theme_button.configure(
             text=f"Switch to {alternate_theme(theme.id).display_name}",
             bg=theme.panel_alt,
@@ -589,6 +609,34 @@ class AtoDesktop:
     def _ask_permission(self, prompt: GuiPermissionPrompt) -> bool:
         """Display one redacted tool request on Tk's UI thread."""
         return show_permission_dialog(self.root, self.theme, prompt)
+
+    def _start_new_conversation(self) -> None:
+        if self._busy or not self.controller.agent.conversation:
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "clear_recent_conversation",
+                "HIGH",
+                '{\n  "effect": "Clear active and persisted recent conversation history",\n'
+                '  "retained": "Long-term memory and knowledge remain unchanged"\n}',
+            ),
+        )
+        if not approved:
+            return
+        try:
+            self.controller.clear_recent_conversation()
+        except AtoError as exc:
+            from tkinter import messagebox
+
+            messagebox.showerror("New conversation", str(exc), parent=self.root)
+            return
+        self._section = "CHAT"
+        self._clear_transcript()
+        self._append("System", "New conversation started. Long-term memory was retained.")
+        self.title.configure(text="Conversation")
+        self.input.focus_set()
 
     def _close(self) -> None:
         self._closed = True
@@ -1573,6 +1621,7 @@ class AtoDesktop:
             text="STOP" if self._stream_active else "SEND",
             state="normal" if self._stream_active or not busy else "disabled",
         )
+        self.new_chat_button.configure(state="disabled" if busy else "normal")
         if self._section == "CHAT":
             self.title.configure(text="Ato is thinking…" if busy else "Conversation")
 

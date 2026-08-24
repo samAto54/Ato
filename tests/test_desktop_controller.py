@@ -56,6 +56,24 @@ def test_desktop_controller_rejects_empty_message() -> None:
         controller.submit("   ")
 
 
+def test_desktop_controller_clears_recent_chat_but_retains_long_term_memory(tmp_path) -> None:
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    long_term = SqliteLongTermMemory(tmp_path / "long-term.db")
+    long_term.remember("Sam prefers concise answers.", "preference")
+    controller = DesktopChatController(
+        Agent(EchoLLM()),
+        store,
+        long_term_memory=long_term,
+    )
+    controller.submit("hello")
+
+    controller.clear_recent_conversation()
+
+    assert controller.agent.conversation == ()
+    assert store.load_history() == ()
+    assert len(long_term.list_records()) == 1
+
+
 def test_desktop_controller_streams_and_persists_completed_turn(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     controller = DesktopChatController(Agent(StreamingLLM()), store)
