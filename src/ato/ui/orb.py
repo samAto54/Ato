@@ -125,7 +125,9 @@ class AtoOrbCanvas:
         height = max(canvas.winfo_height(), 300)
         cx, cy = width / 2, height / 2 - 4
         base = min(width, height) * 0.205
+        reactive_energy = snapshot.activity * profile.waveform
         pulse = 1 + math.sin(elapsed * (2.2 + profile.speed)) * profile.pulse
+        pulse += reactive_energy * 0.1
         radius = base * pulse
         canvas.delete("all")
         canvas.configure(bg=theme.background)
@@ -137,7 +139,7 @@ class AtoOrbCanvas:
         self._draw_energy_lattice(cx, cy, radius, elapsed, profile)
         self._draw_core(cx, cy, radius, elapsed, profile)
         if profile.waveform > 0.01:
-            self._draw_waveform(cx, cy, radius, elapsed, profile)
+            self._draw_waveform(cx, cy, radius, elapsed, profile, snapshot.activity)
         if profile.scan > 0.01:
             self._draw_scan(cx, cy, radius, elapsed, profile.scan)
         canvas.create_text(
@@ -371,14 +373,21 @@ class AtoOrbCanvas:
         )
 
     def _draw_waveform(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
+        self,
+        cx: float,
+        cy: float,
+        radius: float,
+        elapsed: float,
+        profile: OrbMotion,
+        activity: float,
     ) -> None:
         points = []
         for index in range(73):
             angle = index / 72 * math.tau
             wave = math.sin(angle * 8 + elapsed * 6.5) * 0.11
             wave += math.sin(angle * 13 - elapsed * 4.2) * 0.045
-            ring = radius * (1.13 + wave * profile.energy * profile.waveform)
+            response = 0.35 + activity * 1.25
+            ring = radius * (1.13 + wave * profile.energy * profile.waveform * response)
             points.extend((cx + math.cos(angle) * ring, cy + math.sin(angle) * ring))
         self.canvas.create_line(
             *points,

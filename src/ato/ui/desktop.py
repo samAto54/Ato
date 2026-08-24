@@ -880,6 +880,7 @@ class AtoDesktop:
                     active_task=f"Recording {duration}-second voice turn",
                     tool="MICROPHONE RECORDING",
                 ),
+                on_audio_level=self.state_model.set_activity,
                 on_transcription_request=lambda: self.state_model.transition(
                     AtoVisualState.TOOL_EXECUTION,
                     active_task="Awaiting transcription permission",

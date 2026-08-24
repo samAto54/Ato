@@ -35,6 +35,7 @@ class DesktopVoiceTurnService:
         duration_seconds: int,
         *,
         on_recording: Callable[[], None] | None = None,
+        on_audio_level: Callable[[float], None] | None = None,
         on_transcription_request: Callable[[], None] | None = None,
         on_transcribing: Callable[[], None] | None = None,
     ) -> str:
@@ -64,7 +65,12 @@ class DesktopVoiceTurnService:
         try:
             if on_recording is not None:
                 on_recording()
-            recording = self.recorder.record(duration_seconds).resolve()
+            if on_audio_level is None:
+                recording = self.recorder.record(duration_seconds).resolve()
+            else:
+                recording = self.recorder.record(
+                    duration_seconds, on_level=on_audio_level
+                ).resolve()
             relative_path = self._validate_recording(recording)
         except ToolError as exc:
             self._audit(

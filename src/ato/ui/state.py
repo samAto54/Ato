@@ -21,6 +21,7 @@ class VisualSnapshot:
     status: str
     active_task: str
     tool: str | None
+    activity: float
     revision: int
 
 
@@ -55,7 +56,9 @@ class AtoStateModel:
 
     def __init__(self) -> None:
         self._lock = RLock()
-        self._snapshot = VisualSnapshot(AtoVisualState.IDLE, "READY", "Awaiting input", None, 0)
+        self._snapshot = VisualSnapshot(
+            AtoVisualState.IDLE, "READY", "Awaiting input", None, 0.0, 0
+        )
 
     def snapshot(self) -> VisualSnapshot:
         with self._lock:
@@ -83,6 +86,25 @@ class AtoStateModel:
                 _bounded_label(status or _default_status(target), 40),
                 safe_task or _default_task(target),
                 safe_tool,
+                0.0,
+                current.revision + 1,
+            )
+            return self._snapshot
+
+    def set_activity(self, activity: float) -> VisualSnapshot:
+        """Update a transient normalized audio level without changing lifecycle state."""
+
+        if isinstance(activity, bool) or not isinstance(activity, (int, float)):
+            raise ValueError("Ato visual activity must be a number from 0 to 1.")
+        normalized = max(0.0, min(1.0, float(activity)))
+        with self._lock:
+            current = self._snapshot
+            self._snapshot = VisualSnapshot(
+                current.state,
+                current.status,
+                current.active_task,
+                current.tool,
+                normalized,
                 current.revision + 1,
             )
             return self._snapshot

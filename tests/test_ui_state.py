@@ -39,3 +39,15 @@ def test_permission_state_can_enter_and_leave_listening() -> None:
     model.transition(AtoVisualState.TOOL_EXECUTION, tool="TRANSCRIPTION")
     model.transition(AtoVisualState.PROCESSING, tool="TRANSCRIPTION")
     assert model.snapshot().state is AtoVisualState.PROCESSING
+
+
+def test_audio_activity_is_thread_safe_bounded_and_resets_on_transition() -> None:
+    model = AtoStateModel()
+    model.transition(AtoVisualState.LISTENING)
+    assert model.set_activity(1.5).activity == 1.0
+    assert model.set_activity(-0.5).activity == 0.0
+    model.set_activity(0.7)
+    assert model.transition(AtoVisualState.PROCESSING).activity == 0.0
+
+    with pytest.raises(ValueError, match="must be a number"):
+        model.set_activity(True)

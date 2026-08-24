@@ -421,6 +421,9 @@ ticks, a rotating inner lattice, radial energy filaments, multi-layer shell arcs
 field, and a broader processing scan glow while retaining Ato's restrained cyan-and-amber identity.
 State changes use frame-time-based easing, so rotation, pulse, energy, waveform, and scan intensity
 ramp naturally as the backend moves between idle, listening, processing, tool, and speaking states.
+During an approved microphone recording, locally measured audio energy feeds a normalized,
+thread-safe activity channel that expands the core and waveform in real time. Audio levels are
+transient visual data only: they are neither retained nor written to the audit log.
 
 The thread-safe visual model defines these real backend states:
 

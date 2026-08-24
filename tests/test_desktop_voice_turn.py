@@ -13,8 +13,10 @@ class Recorder:
         self.path = path
         self.durations = []
 
-    def record(self, duration_seconds: int) -> Path:
+    def record(self, duration_seconds: int, *, on_level=None) -> Path:
         self.durations.append(duration_seconds)
+        if on_level is not None:
+            on_level(0.65)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_bytes(b"RIFF")
         return self.path
@@ -48,14 +50,17 @@ def build_service(tmp_path, decisions, *, path=None, transcript="draft from voic
 def test_voice_turn_requires_two_permissions_and_returns_draft(tmp_path) -> None:
     service, recorder, transcriber, requests = build_service(tmp_path, [True, True])
     states = []
+    levels = []
     transcript = service.capture(
         5,
         on_recording=lambda: states.append("listening"),
+        on_audio_level=levels.append,
         on_transcription_request=lambda: states.append("transcription_permission"),
         on_transcribing=lambda: states.append("processing"),
     )
     assert transcript == "draft from voice"
     assert states == ["listening", "transcription_permission", "processing"]
+    assert levels == [0.65]
     assert recorder.durations == [5]
     assert len(transcriber.paths) == 1
     assert [(request.tool_name, request.level.value) for request in requests] == [
