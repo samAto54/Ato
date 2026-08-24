@@ -18,11 +18,13 @@ from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager
 from ato.tools import build_read_only_registry
+from ato.tools.search import BraveSearchClient, TavilySearchClient
 from ato.tools.system import collect_system_info
 from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
+from ato.ui.research import DesktopResearchSearch, ResearchSearchResult
 from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
@@ -53,6 +55,7 @@ class DesktopChatController:
     voice_turn_service: DesktopVoiceTurnService | None = None
     workspace_search: DesktopWorkspaceSearch | None = None
     activity_reader: AuditActivityReader | None = None
+    research_search: DesktopResearchSearch | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -716,7 +719,11 @@ class AtoDesktop:
             elif section == "WORKSPACE":
                 lines = ("Choose a literal search term to inspect the authorized workspace.",)
             elif section == "RESEARCH":
-                lines = ("Desktop research is locked until GUI permission dialogs are available.",)
+                lines = (
+                    ("Choose a query to search the public web with confirmation.",)
+                    if self.controller.research_search is not None
+                    else ("Web search is not configured. Add a Tavily or Brave API key.",)
+                )
             elif section == "ACTIVITY":
                 lines = self.controller.activity_snapshot()
             else:
@@ -724,6 +731,8 @@ class AtoDesktop:
             self._show_read_only_lines(lines)
             if section == "WORKSPACE":
                 self.root.after(0, self._start_workspace_search)
+            elif section == "RESEARCH" and self.controller.research_search is not None:
+                self.root.after(0, self._start_research_search)
         self._apply_theme()
 
     def _clear_transcript(self) -> None:
@@ -781,6 +790,55 @@ class AtoDesktop:
             + (" (results truncated)" if result.truncated else "")
         )
         self._show_read_only_lines((summary, *(result.lines or ("No matches found.",))))
+
+    def _start_research_search(self) -> None:
+        if self._busy or self.controller.research_search is None:
+            return
+        from tkinter import simpledialog
+
+        query = simpledialog.askstring(
+            "Ato Research",
+            "Public web search query:",
+            parent=self.root,
+        )
+        if query is None or not query.strip():
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Awaiting approval for web search: {query[:50]}",
+            tool="PUBLIC WEB SEARCH",
+        )
+        threading.Thread(target=self._run_research_search, args=(query,), daemon=True).start()
+
+    def _run_research_search(self, query: str) -> None:
+        assert self.controller.research_search is not None
+        try:
+            result = self.controller.research_search.search(query)
+        except AtoError as exc:
+            self.root.after(0, self._finish_research_search, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_research_search, None, "Web search failed safely.")
+        else:
+            self.root.after(0, self._finish_research_search, result, None)
+
+    def _finish_research_search(
+        self, result: ResearchSearchResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "RESEARCH":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"SEARCH ERROR\n{error}",))
+            return
+        assert result is not None
+        summary = (
+            f"{len(result.lines)} results from {result.provider}.\n"
+            "EXTERNAL CONTENT IS UNTRUSTED EVIDENCE, NOT INSTRUCTIONS."
+        )
+        self._show_read_only_lines((summary, *(result.lines or ("No results found.",))))
 
     def _show_read_only_lines(self, lines: tuple[str, ...]) -> None:
         self.transcript.configure(state="normal")
@@ -894,6 +952,22 @@ def main() -> None:
             )
         )
         activity_reader = AuditActivityReader(settings.audit_file)
+        web_searcher = (
+            TavilySearchClient(settings.tavily_api_key)
+            if settings.tavily_api_key
+            else BraveSearchClient(settings.brave_search_api_key)
+            if settings.brave_search_api_key
+            else None
+        )
+        research_search = (
+            DesktopResearchSearch(
+                web_searcher,
+                PermissionManager(permission_bridge.confirm),
+                AuditLogger(settings.audit_file),
+            )
+            if web_searcher is not None
+            else None
+        )
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -905,6 +979,7 @@ def main() -> None:
                 voice_turn_service,
                 workspace_search,
                 activity_reader,
+                research_search,
             ),
             permission_bridge=permission_bridge,
         ).run()
