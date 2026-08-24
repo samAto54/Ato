@@ -26,6 +26,7 @@ from ato.tools.system import collect_system_info
 from ato.tools.web import fetch_web_page
 from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
+from ato.ui.knowledge_palette import KnowledgeActionPalette
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import show_permission_dialog
@@ -184,6 +185,11 @@ class DesktopChatController:
             raise AtoError("Knowledge storage is not configured.")
         return self.knowledge_store.ingest(relative_path)
 
+    def remove_knowledge(self, document_id: int) -> bool:
+        if self.knowledge_store is None:
+            raise AtoError("Knowledge storage is not configured.")
+        return self.knowledge_store.remove_document(document_id)
+
     def system_snapshot(self) -> tuple[str, ...]:
         if self.workspace_root is None:
             return ("SYSTEM DATA UNAVAILABLE",)
@@ -254,6 +260,7 @@ class AtoDesktop:
         self._fullscreen = False
         self._workspace_palette: WorkspaceActionPalette | None = None
         self._settings_dialog: SettingsDialog | None = None
+        self._knowledge_palette: KnowledgeActionPalette | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
         self._stream_fragments: list[str] = []
         self._stream_start = "ato_stream_start"
@@ -646,6 +653,8 @@ class AtoDesktop:
 
     def _close(self) -> None:
         self._closed = True
+        if self._knowledge_palette is not None:
+            self._knowledge_palette.close()
         if self._settings_dialog is not None:
             self._settings_dialog.close()
         if self._workspace_palette is not None:
@@ -888,10 +897,105 @@ class AtoDesktop:
             if section == "WORKSPACE":
                 self.root.after(0, self._start_workspace_search)
             elif section == "KNOWLEDGE" and self.controller.knowledge_store is not None:
-                self.root.after(0, self._start_knowledge_import)
+                self.root.after(0, self._start_knowledge_actions)
             elif section == "RESEARCH" and self.controller.research_search is not None:
                 self.root.after(0, self._start_research_search)
         self._apply_theme()
+
+    def _start_knowledge_actions(self) -> None:
+        if self._busy or self.controller.knowledge_store is None:
+            return
+        self._knowledge_palette = KnowledgeActionPalette(
+            self.root, self.theme, self._dispatch_knowledge_action
+        )
+
+    def _dispatch_knowledge_action(self, action: str) -> None:
+        if action == "import":
+            self._start_knowledge_import()
+        elif action == "refresh":
+            self._clear_transcript()
+            self._show_read_only_lines(self.controller.knowledge_snapshot())
+        elif action == "remove":
+            self._start_knowledge_remove()
+
+    def _start_knowledge_remove(self) -> None:
+        if self._busy or self.controller.knowledge_store is None:
+            return
+        from tkinter import messagebox, simpledialog
+
+        document_id = simpledialog.askinteger(
+            "Remove knowledge document",
+            "Document ID to remove:",
+            parent=self.root,
+            minvalue=1,
+        )
+        if document_id is None:
+            return
+        document = next(
+            (
+                item
+                for item in self.controller.knowledge_store.list_documents()
+                if item.id == document_id
+            ),
+            None,
+        )
+        if document is None:
+            messagebox.showerror(
+                "Knowledge removal", "That document ID does not exist.", parent=self.root
+            )
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "remove_knowledge_document",
+                "HIGH",
+                json.dumps(
+                    {
+                        "id": document.id,
+                        "path": document.path,
+                        "effect": "Delete locally indexed excerpts",
+                        "source_file": "Retained",
+                    },
+                    indent=2,
+                ),
+            ),
+        )
+        if not approved:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Removing knowledge document #{document.id}",
+            tool="LOCAL KNOWLEDGE REMOVAL",
+        )
+        threading.Thread(
+            target=self._run_knowledge_remove, args=(document.id,), daemon=True
+        ).start()
+
+    def _run_knowledge_remove(self, document_id: int) -> None:
+        try:
+            removed = self.controller.remove_knowledge(document_id)
+        except AtoError as exc:
+            self.root.after(0, self._finish_knowledge_remove, False, str(exc))
+        except Exception:
+            self.root.after(
+                0, self._finish_knowledge_remove, False, "Knowledge removal failed safely."
+            )
+        else:
+            self.root.after(0, self._finish_knowledge_remove, removed, None)
+
+    def _finish_knowledge_remove(self, removed: bool, error: str | None) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "KNOWLEDGE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"REMOVAL ERROR\n{error}",))
+            return
+        heading = "DOCUMENT REMOVED" if removed else "DOCUMENT WAS NOT FOUND"
+        self._show_read_only_lines((heading, *self.controller.knowledge_snapshot()))
 
     def _start_knowledge_import(self) -> None:
         if (

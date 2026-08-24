@@ -196,6 +196,18 @@ def test_desktop_controller_reports_unconfigured_knowledge_import() -> None:
         controller.ingest_knowledge("manual.md")
 
 
+def test_desktop_controller_removes_index_but_not_source_document(tmp_path) -> None:
+    source = tmp_path / "manual.md"
+    source.write_text("Ato desktop knowledge removal.", encoding="utf-8")
+    knowledge = SqliteKnowledgeStore(tmp_path / "knowledge.db", tmp_path)
+    controller = DesktopChatController(Agent(EchoLLM()), knowledge_store=knowledge)
+    document = controller.ingest_knowledge("manual.md")
+
+    assert controller.remove_knowledge(document.id) is True
+    assert knowledge.list_documents() == ()
+    assert source.exists()
+
+
 def test_desktop_system_snapshot_is_local_and_does_not_probe_network(tmp_path) -> None:
     controller = DesktopChatController(Agent(EchoLLM()), workspace_root=tmp_path)
     lines = controller.system_snapshot()
