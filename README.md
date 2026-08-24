@@ -28,6 +28,7 @@ The current build provides:
 - Themed Knowledge controls for import, refresh, and confirmed index removal
 - Themed Research controls for deliberate search and reviewed source fetching
 - Reusable fixed-action palette foundation shared by Memory, Knowledge, and Research
+- Native, secret-redacted desktop startup errors with actionable configuration guidance
 - Complete themed Memory lifecycle controls, including bounded expiration and permanent forgetting
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -312,6 +313,10 @@ Run the first native desktop interface after installing the package:
 ```powershell
 ato-gui
 ```
+
+Expected configuration or initialization failures open a native bounded error dialog and are also
+written to the launching terminal. Messages reuse Ato's secret-redaction policy and give targeted
+`.env` guidance without displaying API-key values.
 
 The window provides persisted text chat, recent-history restoration, subsystem navigation, status
 indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.

@@ -44,6 +44,7 @@ from ato.ui.research import (
 from ato.ui.research_palette import ResearchActionPalette
 from ato.ui.settings_dialog import DesktopCapabilities, SettingsDialog
 from ato.ui.speech import DesktopSpeechService
+from ato.ui.startup_error import build_startup_failure, show_startup_failure
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 from ato.ui.voice_turn import DesktopVoiceTurnService
@@ -2371,7 +2372,9 @@ def main() -> None:
             permission_bridge=permission_bridge,
         ).run()
     except (AtoError, ValueError) as exc:
-        raise SystemExit(f"Unable to start Ato desktop: {exc}") from exc
+        failure = build_startup_failure(exc)
+        show_startup_failure(failure)
+        raise SystemExit(f"{failure.title}: {failure.display()}") from None
 
 
 if __name__ == "__main__":
