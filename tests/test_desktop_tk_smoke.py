@@ -6,7 +6,8 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.ui.desktop import AtoDesktop, DesktopChatController
 from ato.ui.palette import WorkspaceActionPalette
-from ato.ui.permissions import GuiPermissionBridge
+from ato.ui.permission_dialog import PermissionDialog
+from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
 from ato.ui.state import AtoVisualState
 from ato.ui.themes import ThemeId
 
@@ -51,6 +52,17 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     desktop.root.update_idletasks()
     assert palette.window.winfo_exists() == 1
     palette.close()
+
+    permission = PermissionDialog(
+        desktop.root,
+        desktop.theme,
+        GuiPermissionPrompt("test_tool", "HIGH", '{"path": "example.txt"}'),
+    )
+    desktop.root.update_idletasks()
+    assert permission.result is False
+    assert permission.window.winfo_exists() == 1
+    permission.deny()
+    assert permission.result is False
     assert bridge.attached is True
     desktop._close()
     assert bridge.attached is False

@@ -10,6 +10,7 @@ The current build provides:
 
 - An interactive terminal conversation
 - A themed Workspace command matrix with grouped fixed actions and visible risk levels
+- A themed fail-closed security panel for desktop permission decisions
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
 - A secret-free `/status` view of local memory, knowledge, tool, and voice availability
 - Local rejection of unknown slash commands with a `/help` hint and no model API request
@@ -358,6 +359,9 @@ The thread-safe visual model defines these real backend states:
 Today the desktop automatically transitions `IDLE -> PROCESSING -> IDLE` around real chat work.
 Its permission bridge safely marshals future background tool requests onto Tk's UI thread, serializes
 prompts, redacts sensitive arguments, and denies requests on timeout, shutdown, or dialog failure.
+Protected desktop operations appear in an Ato-themed authorization panel showing the exact tool,
+risk level, and bounded redacted arguments. Closing the panel or pressing Escape denies the request;
+only **ALLOW ONCE** authorizes that single operation.
 When `ATO_VOICE_ENABLED=true`, **SPEAK LAST** reads only the newest assistant reply using offline
 Windows speech after HIGH confirmation. The HUD enters `TOOL_EXECUTION` while awaiting approval,
 then `SPEAKING` only after approval and returns to `IDLE` when playback ends. The action is audited,
