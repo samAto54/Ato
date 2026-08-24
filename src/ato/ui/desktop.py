@@ -744,8 +744,8 @@ class AtoDesktop:
                 lines = self.controller.knowledge_snapshot()
             elif section == "WORKSPACE":
                 lines = (
-                    "Choose SEARCH, STATUS, DIFF, STAGED, LOG, or BRANCHES. All actions are "
-                    "read-only and bounded.",
+                    "Choose SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or TESTS. "
+                    "All actions are bounded; verification never applies fixes.",
                 )
             elif section == "RESEARCH":
                 lines = (
@@ -776,12 +776,24 @@ class AtoDesktop:
 
         action = simpledialog.askstring(
             "Inspect workspace",
-            "Action: SEARCH, STATUS, DIFF, STAGED, LOG, or BRANCHES",
+            "Action: SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or TESTS",
             parent=self.root,
         )
         if action is None or not action.strip():
             return
         normalized = action.strip().casefold()
+        if normalized == "syntax":
+            path = simpledialog.askstring(
+                "Python syntax check",
+                "Relative .py file path:",
+                parent=self.root,
+            )
+            if path is not None and path.strip():
+                self._start_code_inspection("syntax", path)
+            return
+        if normalized in {"lint", "tests"}:
+            self._start_code_inspection(normalized)
+            return
         if normalized != "search":
             if normalized not in {"status", "diff", "staged", "log", "branches"}:
                 from tkinter import messagebox
@@ -802,6 +814,50 @@ class AtoDesktop:
             tool="READ-ONLY FILE SEARCH",
         )
         threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _start_code_inspection(self, action: str, path: str | None = None) -> None:
+        self._busy = True
+        label = "PYTHON SYNTAX" if action == "syntax" else action.upper()
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Running fixed {label.casefold()} verification",
+            tool=f"CODE CHECK - {label}",
+        )
+        threading.Thread(
+            target=self._run_code_inspection,
+            args=(action, path),
+            daemon=True,
+        ).start()
+
+    def _run_code_inspection(self, action: str, path: str | None) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = (
+                self.controller.workspace_search.check_syntax(path or "")
+                if action == "syntax"
+                else self.controller.workspace_search.run_code_check(action)
+            )
+        except AtoError as exc:
+            self.root.after(0, self._finish_code_inspection, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_code_inspection, None, "Code check failed safely.")
+        else:
+            self.root.after(0, self._finish_code_inspection, result, None)
+
+    def _finish_code_inspection(
+        self, result: WorkspaceInspectionResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"CODE CHECK ERROR\n{error}",))
+            return
+        assert result is not None
+        heading = result.label + ("\nDISPLAY OUTPUT TRUNCATED" if result.truncated else "")
+        self._show_read_only_lines((heading, result.text))
 
     def _start_git_inspection(self, action: str) -> None:
         self._busy = True

@@ -79,6 +79,7 @@ The current build provides:
 - Reviewed one-shot desktop voice turns with real `LISTENING` and local `PROCESSING` states
 - Audited read-only literal workspace search in the desktop HUD with bounded result display
 - Audited desktop Git status, diff, staged diff, recent log, and local-branch inspection
+- Desktop Python syntax checks plus confirmed fixed Ruff and pytest verification
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
@@ -308,7 +309,10 @@ The desktop sidebar is functional: Chat restores the 20 most recent messages, wh
 Knowledge show bounded read-only local snapshots. Workspace runs the existing bounded literal file
 search through its LOW-permission audit path and displays at most 100 matches. It also exposes fixed
 read-only Git status, diff, staged diff, 20-entry log, and local branch views; it accepts no command
-text or flags and caps displayed output at 20,000 characters. Research provides a
+text or flags and caps displayed output at 20,000 characters. It can also parse one Python file
+without execution, run fixed non-fixing Ruff after MEDIUM confirmation, and run fixed pytest after
+HIGH confirmation. Verification output is bounded and failed checks are reported explicitly.
+Research provides a
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
 external evidence. A selected result can be fetched only after a second MEDIUM confirmation;
 redirects, private networks, credentialed URLs, oversized responses, and unsupported content are
