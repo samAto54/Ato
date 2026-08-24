@@ -25,7 +25,7 @@ The current build provides:
 - Confirmed desktop New Chat control that retains long-term memory and knowledge
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
-- Themed Memory controls for remembering, refreshing, archiving, and restoring explicit facts
+- Themed Memory controls for remembering, editing, archiving, restoring, and forgetting facts
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -330,6 +330,8 @@ recent conversation. It deliberately retains Ato's explicit long-term memories a
 Opening Memory presents fixed local actions. Remember, Archive, and Restore require HIGH-risk
 confirmation showing the exact fact and category; Refresh is read-only. Archived memories remain
 stored locally but are excluded from normal retrieval until explicitly restored.
+Edit preserves the selected memory ID and shows the old and proposed values before approval. Forget
+is CRITICAL because it permanently removes the selected long-term memory and cannot be undone.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.

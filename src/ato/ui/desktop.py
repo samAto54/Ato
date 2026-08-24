@@ -205,6 +205,16 @@ class DesktopChatController:
             else self.long_term_memory.restore(memory_id)
         )
 
+    def update_memory(self, memory_id: int, content: str, category: str) -> MemoryItem | None:
+        if self.long_term_memory is None:
+            raise AtoError("Long-term memory is not configured.")
+        return self.long_term_memory.update(memory_id, content, category)
+
+    def forget_memory(self, memory_id: int) -> bool:
+        if self.long_term_memory is None:
+            raise AtoError("Long-term memory is not configured.")
+        return self.long_term_memory.forget(memory_id)
+
     def system_snapshot(self) -> tuple[str, ...]:
         if self.workspace_root is None:
             return ("SYSTEM DATA UNAVAILABLE",)
@@ -937,6 +947,28 @@ class AtoDesktop:
             self._start_memory_remember()
         elif action in {"archive", "restore"}:
             self._start_memory_lifecycle(action)
+        elif action == "edit":
+            self._start_memory_edit()
+        elif action == "forget":
+            self._start_memory_forget()
+
+    def _memory_record(self, memory_id: int):
+        assert self.controller.long_term_memory is not None
+        return next(
+            (
+                item
+                for item in self.controller.long_term_memory.list_records(
+                    limit=100, include_inactive=True
+                )
+                if item.id == memory_id
+            ),
+            None,
+        )
+
+    def _ask_memory_id(self, title: str) -> int | None:
+        from tkinter import simpledialog
+
+        return simpledialog.askinteger(title, "Memory ID:", parent=self.root, minvalue=1)
 
     def _start_memory_remember(self) -> None:
         from tkinter import simpledialog
@@ -970,26 +1002,12 @@ class AtoDesktop:
 
     def _start_memory_lifecycle(self, action: str) -> None:
         assert self.controller.long_term_memory is not None
-        from tkinter import messagebox, simpledialog
+        from tkinter import messagebox
 
-        memory_id = simpledialog.askinteger(
-            f"{action.title()} memory",
-            "Memory ID:",
-            parent=self.root,
-            minvalue=1,
-        )
+        memory_id = self._ask_memory_id(f"{action.title()} memory")
         if memory_id is None:
             return
-        record = next(
-            (
-                item
-                for item in self.controller.long_term_memory.list_records(
-                    limit=100, include_inactive=True
-                )
-                if item.id == memory_id
-            ),
-            None,
-        )
+        record = self._memory_record(memory_id)
         if record is None:
             messagebox.showerror("Memory", "That memory ID does not exist.", parent=self.root)
             return
@@ -1007,6 +1025,82 @@ class AtoDesktop:
         )
         if approved:
             self._begin_memory_operation(action, memory_id)
+
+    def _start_memory_edit(self) -> None:
+        from tkinter import messagebox, simpledialog
+
+        memory_id = self._ask_memory_id("Edit memory")
+        if memory_id is None:
+            return
+        record = self._memory_record(memory_id)
+        if record is None:
+            messagebox.showerror("Memory", "That memory ID does not exist.", parent=self.root)
+            return
+        content = simpledialog.askstring(
+            "Edit memory",
+            "Replacement fact:",
+            initialvalue=record.content,
+            parent=self.root,
+        )
+        if content is None or not content.strip():
+            return
+        category = simpledialog.askstring(
+            "Edit memory category",
+            "Category: fact, preference, project, or decision",
+            initialvalue=record.category.value,
+            parent=self.root,
+        )
+        if category is None or not category.strip():
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "edit_long_term_memory",
+                "HIGH",
+                json.dumps(
+                    {
+                        "id": record.id,
+                        "old_content": record.content,
+                        "new_content": content.strip(),
+                        "new_category": category.strip(),
+                    },
+                    indent=2,
+                ),
+            ),
+        )
+        if approved:
+            self._begin_memory_operation("edit", memory_id, content.strip(), category.strip())
+
+    def _start_memory_forget(self) -> None:
+        from tkinter import messagebox
+
+        memory_id = self._ask_memory_id("Forget memory permanently")
+        if memory_id is None:
+            return
+        record = self._memory_record(memory_id)
+        if record is None:
+            messagebox.showerror("Memory", "That memory ID does not exist.", parent=self.root)
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "forget_long_term_memory",
+                "CRITICAL",
+                json.dumps(
+                    {
+                        "id": record.id,
+                        "category": record.category.value,
+                        "content": record.content,
+                        "effect": "Permanently delete this long-term memory",
+                    },
+                    indent=2,
+                ),
+            ),
+        )
+        if approved:
+            self._begin_memory_operation("forget", memory_id)
 
     def _begin_memory_operation(self, action: str, *arguments: object) -> None:
         self._busy = True
@@ -1026,7 +1120,7 @@ class AtoDesktop:
             if action == "remember":
                 item = self.controller.remember_memory(str(arguments[0]), str(arguments[1]))
                 result = f"MEMORY SAVED\n#{item.id}  {item.content}"
-            else:
+            elif action in {"archive", "restore"}:
                 changed = self.controller.set_memory_archived(
                     int(arguments[0]), archived=action == "archive"
                 )
@@ -1035,6 +1129,18 @@ class AtoDesktop:
                     if changed
                     else "MEMORY WAS NOT FOUND"
                 )
+            elif action == "edit":
+                item = self.controller.update_memory(
+                    int(arguments[0]), str(arguments[1]), str(arguments[2])
+                )
+                result = (
+                    f"MEMORY UPDATED\n#{item.id}  {item.content}"
+                    if item is not None
+                    else "MEMORY WAS NOT FOUND"
+                )
+            else:
+                forgotten = self.controller.forget_memory(int(arguments[0]))
+                result = "MEMORY FORGOTTEN" if forgotten else "MEMORY WAS NOT FOUND"
         except (AtoError, ValueError) as exc:
             self.root.after(0, self._finish_memory_operation, None, str(exc))
         except Exception:

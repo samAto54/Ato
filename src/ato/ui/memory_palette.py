@@ -8,9 +8,11 @@ from ato.ui.themes import UiTheme
 
 MEMORY_ACTIONS = (
     ("remember", "REMEMBER", "Store one explicit fact", "HIGH"),
+    ("edit", "EDIT", "Replace one fact; preserve its ID", "HIGH"),
     ("refresh", "REFRESH", "Reload memory metadata", "LOW"),
     ("archive", "ARCHIVE", "Hide one memory from retrieval", "HIGH"),
     ("restore", "RESTORE", "Reactivate one archived memory", "HIGH"),
+    ("forget", "FORGET", "Permanently delete one memory", "CRITICAL"),
 )
 
 

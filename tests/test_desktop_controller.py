@@ -86,6 +86,19 @@ def test_desktop_controller_manages_explicit_long_term_memory(tmp_path) -> None:
     assert long_term.list_memories()[0].content == "Ato uses a cyan HUD."
 
 
+def test_desktop_controller_updates_and_forgets_long_term_memory(tmp_path) -> None:
+    long_term = SqliteLongTermMemory(tmp_path / "long-term.db")
+    controller = DesktopChatController(Agent(EchoLLM()), long_term_memory=long_term)
+    item = controller.remember_memory("Ato uses cyan.", "fact")
+
+    updated = controller.update_memory(item.id, "Ato uses cyan and amber.", "preference")
+    assert updated is not None
+    assert updated.id == item.id
+    assert updated.content == "Ato uses cyan and amber."
+    assert controller.forget_memory(item.id) is True
+    assert long_term.list_records(include_inactive=True) == ()
+
+
 def test_desktop_controller_streams_and_persists_completed_turn(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     controller = DesktopChatController(Agent(StreamingLLM()), store)
