@@ -75,6 +75,17 @@ def test_desktop_controller_clears_recent_chat_but_retains_long_term_memory(tmp_
     assert len(long_term.list_records()) == 1
 
 
+def test_desktop_controller_manages_explicit_long_term_memory(tmp_path) -> None:
+    long_term = SqliteLongTermMemory(tmp_path / "long-term.db")
+    controller = DesktopChatController(Agent(EchoLLM()), long_term_memory=long_term)
+
+    item = controller.remember_memory("Ato uses a cyan HUD.", "project")
+    assert controller.set_memory_archived(item.id, archived=True) is True
+    assert long_term.list_memories() == ()
+    assert controller.set_memory_archived(item.id, archived=False) is True
+    assert long_term.list_memories()[0].content == "Ato uses a cyan HUD."
+
+
 def test_desktop_controller_streams_and_persists_completed_turn(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     controller = DesktopChatController(Agent(StreamingLLM()), store)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
-from ato.brain.memory import CompositeMemoryRetriever
+from ato.brain.memory import CompositeMemoryRetriever, MemoryItem
 from ato.brain.messages import Role
 from ato.brain.prompts import SYSTEM_PROMPT
 from ato.coding import SqliteEditCheckpointStore
@@ -27,6 +27,7 @@ from ato.tools.web import fetch_web_page
 from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.knowledge_palette import KnowledgeActionPalette
+from ato.ui.memory_palette import MemoryActionPalette
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import show_permission_dialog
@@ -190,6 +191,20 @@ class DesktopChatController:
             raise AtoError("Knowledge storage is not configured.")
         return self.knowledge_store.remove_document(document_id)
 
+    def remember_memory(self, content: str, category: str) -> MemoryItem:
+        if self.long_term_memory is None:
+            raise AtoError("Long-term memory is not configured.")
+        return self.long_term_memory.remember(content, category)
+
+    def set_memory_archived(self, memory_id: int, *, archived: bool) -> bool:
+        if self.long_term_memory is None:
+            raise AtoError("Long-term memory is not configured.")
+        return (
+            self.long_term_memory.archive(memory_id)
+            if archived
+            else self.long_term_memory.restore(memory_id)
+        )
+
     def system_snapshot(self) -> tuple[str, ...]:
         if self.workspace_root is None:
             return ("SYSTEM DATA UNAVAILABLE",)
@@ -261,6 +276,7 @@ class AtoDesktop:
         self._workspace_palette: WorkspaceActionPalette | None = None
         self._settings_dialog: SettingsDialog | None = None
         self._knowledge_palette: KnowledgeActionPalette | None = None
+        self._memory_palette: MemoryActionPalette | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
         self._stream_fragments: list[str] = []
         self._stream_start = "ato_stream_start"
@@ -655,6 +671,8 @@ class AtoDesktop:
         self._closed = True
         if self._knowledge_palette is not None:
             self._knowledge_palette.close()
+        if self._memory_palette is not None:
+            self._memory_palette.close()
         if self._settings_dialog is not None:
             self._settings_dialog.close()
         if self._workspace_palette is not None:
@@ -896,11 +914,144 @@ class AtoDesktop:
             self._show_read_only_lines(lines)
             if section == "WORKSPACE":
                 self.root.after(0, self._start_workspace_search)
+            elif section == "MEMORY" and self.controller.long_term_memory is not None:
+                self.root.after(0, self._start_memory_actions)
             elif section == "KNOWLEDGE" and self.controller.knowledge_store is not None:
                 self.root.after(0, self._start_knowledge_actions)
             elif section == "RESEARCH" and self.controller.research_search is not None:
                 self.root.after(0, self._start_research_search)
         self._apply_theme()
+
+    def _start_memory_actions(self) -> None:
+        if self._busy or self.controller.long_term_memory is None:
+            return
+        self._memory_palette = MemoryActionPalette(
+            self.root, self.theme, self._dispatch_memory_action
+        )
+
+    def _dispatch_memory_action(self, action: str) -> None:
+        if action == "refresh":
+            self._clear_transcript()
+            self._show_read_only_lines(self.controller.memory_snapshot())
+        elif action == "remember":
+            self._start_memory_remember()
+        elif action in {"archive", "restore"}:
+            self._start_memory_lifecycle(action)
+
+    def _start_memory_remember(self) -> None:
+        from tkinter import simpledialog
+
+        content = simpledialog.askstring(
+            "Remember fact", "Fact to store in long-term memory:", parent=self.root
+        )
+        if content is None or not content.strip():
+            return
+        category = simpledialog.askstring(
+            "Memory category",
+            "Category: fact, preference, project, or decision",
+            initialvalue="fact",
+            parent=self.root,
+        )
+        if category is None or not category.strip():
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "remember_long_term_memory",
+                "HIGH",
+                json.dumps(
+                    {"category": category.strip(), "content": content.strip()}, indent=2
+                ),
+            ),
+        )
+        if approved:
+            self._begin_memory_operation("remember", content.strip(), category.strip())
+
+    def _start_memory_lifecycle(self, action: str) -> None:
+        assert self.controller.long_term_memory is not None
+        from tkinter import messagebox, simpledialog
+
+        memory_id = simpledialog.askinteger(
+            f"{action.title()} memory",
+            "Memory ID:",
+            parent=self.root,
+            minvalue=1,
+        )
+        if memory_id is None:
+            return
+        record = next(
+            (
+                item
+                for item in self.controller.long_term_memory.list_records(
+                    limit=100, include_inactive=True
+                )
+                if item.id == memory_id
+            ),
+            None,
+        )
+        if record is None:
+            messagebox.showerror("Memory", "That memory ID does not exist.", parent=self.root)
+            return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                f"{action}_long_term_memory",
+                "HIGH",
+                json.dumps(
+                    {"id": record.id, "category": record.category.value, "content": record.content},
+                    indent=2,
+                ),
+            ),
+        )
+        if approved:
+            self._begin_memory_operation(action, memory_id)
+
+    def _begin_memory_operation(self, action: str, *arguments: object) -> None:
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Applying memory action: {action}",
+            tool="LOCAL LONG-TERM MEMORY",
+        )
+        threading.Thread(
+            target=self._run_memory_operation,
+            args=(action, *arguments),
+            daemon=True,
+        ).start()
+
+    def _run_memory_operation(self, action: str, *arguments: object) -> None:
+        try:
+            if action == "remember":
+                item = self.controller.remember_memory(str(arguments[0]), str(arguments[1]))
+                result = f"MEMORY SAVED\n#{item.id}  {item.content}"
+            else:
+                changed = self.controller.set_memory_archived(
+                    int(arguments[0]), archived=action == "archive"
+                )
+                result = (
+                    f"MEMORY {action.upper()}D"
+                    if changed
+                    else "MEMORY WAS NOT FOUND"
+                )
+        except (AtoError, ValueError) as exc:
+            self.root.after(0, self._finish_memory_operation, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_memory_operation, None, "Memory action failed safely.")
+        else:
+            self.root.after(0, self._finish_memory_operation, result, None)
+
+    def _finish_memory_operation(self, result: str | None, error: str | None) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "MEMORY":
+            return
+        self._clear_transcript()
+        self._show_read_only_lines(
+            (f"MEMORY ERROR\n{error}" if error else result or "Memory action completed.",)
+            + self.controller.memory_snapshot()
+        )
 
     def _start_knowledge_actions(self) -> None:
         if self._busy or self.controller.knowledge_store is None:

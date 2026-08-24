@@ -6,6 +6,7 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.ui.desktop import AtoDesktop, DesktopChatController
 from ato.ui.knowledge_palette import KnowledgeActionPalette
+from ato.ui.memory_palette import MemoryActionPalette
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import PermissionDialog
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
@@ -59,6 +60,11 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     desktop.root.update_idletasks()
     assert knowledge_palette.window.winfo_exists() == 1
     knowledge_palette.close()
+
+    memory_palette = MemoryActionPalette(desktop.root, desktop.theme, selected.append)
+    desktop.root.update_idletasks()
+    assert memory_palette.window.winfo_exists() == 1
+    memory_palette.close()
 
     permission = PermissionDialog(
         desktop.root,

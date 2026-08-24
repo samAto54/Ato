@@ -25,6 +25,7 @@ The current build provides:
 - Confirmed desktop New Chat control that retains long-term memory and knowledge
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
+- Themed Memory controls for remembering, refreshing, archiving, and restoring explicit facts
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -326,6 +327,9 @@ While a response is active, **SEND** becomes **STOP**. Stopping closes the respo
 next provider fragment boundary, discards partial output, and does not commit the interrupted turn.
 **NEW CHAT** requires a HIGH-risk confirmation before clearing the active context and persisted
 recent conversation. It deliberately retains Ato's explicit long-term memories and knowledge base.
+Opening Memory presents fixed local actions. Remember, Archive, and Restore require HIGH-risk
+confirmation showing the exact fact and category; Refresh is read-only. Archived memories remain
+stored locally but are excluded from normal retrieval until explicitly restored.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
