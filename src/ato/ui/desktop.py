@@ -26,6 +26,7 @@ from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.palette import WorkspaceActionPalette
+from ato.ui.permission_dialog import show_permission_dialog
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
 from ato.ui.research import (
     DesktopResearchFetch,
@@ -545,17 +546,7 @@ class AtoDesktop:
 
     def _ask_permission(self, prompt: GuiPermissionPrompt) -> bool:
         """Display one redacted tool request on Tk's UI thread."""
-        from tkinter import messagebox
-
-        return messagebox.askyesno(
-            "Ato permission request",
-            f"Tool: {prompt.tool_name}\n"
-            f"Permission: {prompt.permission}\n\n"
-            f"Arguments (secrets redacted):\n{prompt.details}\n\n"
-            "Review the requested action and its effects before allowing it.",
-            icon="warning",
-            parent=self.root,
-        )
+        return show_permission_dialog(self.root, self.theme, prompt)
 
     def _close(self) -> None:
         if self._workspace_palette is not None:
