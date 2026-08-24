@@ -314,6 +314,20 @@ Run the first native desktop interface after installing the package:
 ato-gui
 ```
 
+On Windows, double-click `start-ato.cmd` in the project root to launch the desktop without opening
+VS Code or keeping a terminal window visible. The launcher resolves this project folder dynamically,
+uses `.venv\Scripts\pythonw.exe`, and contains no API keys or machine-specific absolute paths.
+
+After completing setup, optionally create a Desktop shortcut from PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_windows_shortcut.ps1
+```
+
+The installer refuses to overwrite an existing `Ato.lnk`; remove the old shortcut manually before
+reinstalling. The shortcut points back to `start-ato.cmd`, so moving the project requires reinstalling
+the shortcut.
+
 Expected configuration or initialization failures open a native bounded error dialog and are also
 written to the launching terminal. Messages reuse Ato's secret-redaction policy and give targeted
 `.env` guidance without displaying API-key values.
