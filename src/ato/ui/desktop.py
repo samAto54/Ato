@@ -36,7 +36,11 @@ from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 from ato.ui.voice_turn import DesktopVoiceTurnService
-from ato.ui.workspace import DesktopWorkspaceSearch, WorkspaceSearchResult
+from ato.ui.workspace import (
+    DesktopWorkspaceSearch,
+    WorkspaceInspectionResult,
+    WorkspaceSearchResult,
+)
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
@@ -739,7 +743,10 @@ class AtoDesktop:
             elif section == "KNOWLEDGE":
                 lines = self.controller.knowledge_snapshot()
             elif section == "WORKSPACE":
-                lines = ("Choose a literal search term to inspect the authorized workspace.",)
+                lines = (
+                    "Choose SEARCH, STATUS, DIFF, STAGED, LOG, or BRANCHES. All actions are "
+                    "read-only and bounded.",
+                )
             elif section == "RESEARCH":
                 lines = (
                     ("Choose a query to search the public web with confirmation.",)
@@ -767,10 +774,24 @@ class AtoDesktop:
             return
         from tkinter import simpledialog
 
-        query = simpledialog.askstring(
-            "Search workspace",
-            "Literal text to find:",
+        action = simpledialog.askstring(
+            "Inspect workspace",
+            "Action: SEARCH, STATUS, DIFF, STAGED, LOG, or BRANCHES",
             parent=self.root,
+        )
+        if action is None or not action.strip():
+            return
+        normalized = action.strip().casefold()
+        if normalized != "search":
+            if normalized not in {"status", "diff", "staged", "log", "branches"}:
+                from tkinter import messagebox
+
+                messagebox.showerror("Workspace", "Unknown read-only action.", parent=self.root)
+                return
+            self._start_git_inspection(normalized)
+            return
+        query = simpledialog.askstring(
+            "Search workspace", "Literal text to find:", parent=self.root
         )
         if query is None or not query.strip():
             return
@@ -781,6 +802,41 @@ class AtoDesktop:
             tool="READ-ONLY FILE SEARCH",
         )
         threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _start_git_inspection(self, action: str) -> None:
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Inspecting Git {action}",
+            tool=f"READ-ONLY GIT {action.upper()}",
+        )
+        threading.Thread(target=self._run_git_inspection, args=(action,), daemon=True).start()
+
+    def _run_git_inspection(self, action: str) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = self.controller.workspace_search.inspect_git(action)
+        except AtoError as exc:
+            self.root.after(0, self._finish_git_inspection, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_git_inspection, None, "Git inspection failed safely.")
+        else:
+            self.root.after(0, self._finish_git_inspection, result, None)
+
+    def _finish_git_inspection(
+        self, result: WorkspaceInspectionResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"GIT ERROR\n{error}",))
+            return
+        assert result is not None
+        heading = result.label + ("\nDISPLAY OUTPUT TRUNCATED" if result.truncated else "")
+        self._show_read_only_lines((heading, result.text))
 
     def _run_workspace_search(self, query: str) -> None:
         assert self.controller.workspace_search is not None

@@ -9,12 +9,20 @@ from ato.exceptions import ToolError
 from ato.tools import ToolRegistry
 
 MAX_GUI_SEARCH_RESULTS = 100
+MAX_GUI_INSPECTION_CHARS = 20_000
 
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceSearchResult:
     lines: tuple[str, ...]
     files_scanned: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceInspectionResult:
+    label: str
+    text: str
     truncated: bool
 
 
@@ -56,3 +64,40 @@ class DesktopWorkspaceSearch:
                 raise ToolError("Workspace search returned an invalid result.") from exc
             lines.append(f"{path}:{line_number}\n{text[:500]}")
         return WorkspaceSearchResult(tuple(lines), files_scanned, truncated)
+
+    def inspect_git(self, action: str) -> WorkspaceInspectionResult:
+        normalized = action.strip().casefold()
+        definitions = {
+            "status": ("git_status", {}, "GIT STATUS", False),
+            "diff": ("git_diff", {"staged": False}, "UNSTAGED GIT DIFF", True),
+            "staged": ("git_diff", {"staged": True}, "STAGED GIT DIFF", True),
+            "log": ("git_log", {"max_count": 20}, "RECENT GIT LOG", True),
+            "branches": ("git_branches", {}, "LOCAL GIT BRANCHES", True),
+        }
+        definition = definitions.get(normalized)
+        if definition is None:
+            raise ToolError("Unknown Git inspection action.")
+        tool_name, arguments, label, structured = definition
+        raw = self.registry.execute(
+            tool_name,
+            arguments,
+            user_request=f"Inspect {label.casefold()} from the desktop",
+        )
+        truncated = False
+        output = raw
+        if structured:
+            try:
+                payload = json.loads(raw)
+                exit_code = int(payload["exit_code"])
+                output = str(payload["output"])
+                truncated = bool(payload["truncated"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise ToolError("Git inspection returned an invalid result.") from exc
+            if exit_code != 0:
+                raise ToolError(f"{label.title()} failed safely.")
+        display_truncated = truncated or len(output) > MAX_GUI_INSPECTION_CHARS
+        return WorkspaceInspectionResult(
+            label,
+            output[:MAX_GUI_INSPECTION_CHARS] or "No output.",
+            display_truncated,
+        )
