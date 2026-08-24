@@ -19,6 +19,17 @@ class OrbProfile:
     scan: bool
 
 
+@dataclass(frozen=True, slots=True)
+class OrbMotion:
+    """Continuously animated form of a state's discrete visual profile."""
+
+    speed: float
+    pulse: float
+    energy: float
+    waveform: float
+    scan: float
+
+
 ORB_PROFILES = {
     AtoVisualState.IDLE: OrbProfile(0.22, 0.035, 0.35, False, False),
     AtoVisualState.LISTENING: OrbProfile(0.75, 0.12, 0.78, True, False),
@@ -33,6 +44,37 @@ def visual_profile(state: AtoVisualState | str) -> OrbProfile:
     return ORB_PROFILES[selected]
 
 
+def motion_profile(profile: OrbProfile) -> OrbMotion:
+    return OrbMotion(
+        speed=profile.speed,
+        pulse=profile.pulse,
+        energy=profile.energy,
+        waveform=float(profile.waveform),
+        scan=float(profile.scan),
+    )
+
+
+def blend_motion(current: OrbMotion, target: OrbMotion, amount: float) -> OrbMotion:
+    """Interpolate every motion channel, clamping the blend to a safe range."""
+
+    amount = max(0.0, min(1.0, amount))
+    if amount == 0.0:
+        return current
+    if amount == 1.0:
+        return target
+
+    def blend(start: float, end: float) -> float:
+        return start + (end - start) * amount
+
+    return OrbMotion(
+        speed=blend(current.speed, target.speed),
+        pulse=blend(current.pulse, target.pulse),
+        energy=blend(current.energy, target.energy),
+        waveform=blend(current.waveform, target.waveform),
+        scan=blend(current.scan, target.scan),
+    )
+
+
 class AtoOrbCanvas:
     """Draw a living layered orb using only local vector primitives."""
 
@@ -43,6 +85,8 @@ class AtoOrbCanvas:
         self.theme = theme
         self.canvas = tk.Canvas(parent, height=height, highlightthickness=0, bd=0)
         self._started = time.monotonic()
+        self._last_frame = self._started
+        self._motion = motion_profile(visual_profile(AtoVisualState.IDLE))
         self._running = True
         self.canvas.bind("<Destroy>", self._stop)
         self._animate()
@@ -63,14 +107,20 @@ class AtoOrbCanvas:
     def _animate(self) -> None:
         if not self._running:
             return
-        self._draw(time.monotonic() - self._started)
+        now = time.monotonic()
+        frame_time = max(0.0, min(now - self._last_frame, 0.25))
+        self._last_frame = now
+        self._draw(now - self._started, frame_time)
         self.canvas.after(33, self._animate)
 
-    def _draw(self, elapsed: float) -> None:
+    def _draw(self, elapsed: float, frame_time: float) -> None:
         canvas = self.canvas
         theme = self.theme
         snapshot = self.state_model.snapshot()
-        profile = visual_profile(snapshot.state)
+        target = motion_profile(visual_profile(snapshot.state))
+        easing = 1.0 - math.exp(-frame_time * 5.5)
+        self._motion = blend_motion(self._motion, target, easing)
+        profile = self._motion
         width = max(canvas.winfo_width(), 500)
         height = max(canvas.winfo_height(), 300)
         cx, cy = width / 2, height / 2 - 4
@@ -86,10 +136,10 @@ class AtoOrbCanvas:
         self._draw_rings(cx, cy, radius, elapsed, profile)
         self._draw_energy_lattice(cx, cy, radius, elapsed, profile)
         self._draw_core(cx, cy, radius, elapsed, profile)
-        if profile.waveform:
+        if profile.waveform > 0.01:
             self._draw_waveform(cx, cy, radius, elapsed, profile)
-        if profile.scan:
-            self._draw_scan(cx, cy, radius, elapsed)
+        if profile.scan > 0.01:
+            self._draw_scan(cx, cy, radius, elapsed, profile.scan)
         canvas.create_text(
             cx,
             cy + radius + 42,
@@ -106,7 +156,7 @@ class AtoOrbCanvas:
         )
 
     def _draw_field(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         color = _mix(self.theme.background, self.theme.accent, 0.1 + profile.energy * 0.04)
         span = radius * 2.5
@@ -139,7 +189,7 @@ class AtoOrbCanvas:
         )
 
     def _draw_particles(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         for index in range(28):
             angle = index * 2.399 + elapsed * profile.speed * (0.08 + index % 3 * 0.025)
@@ -162,7 +212,7 @@ class AtoOrbCanvas:
             self.canvas.create_oval(x - size, y - size, x + size, y + size, fill=color, outline="")
 
     def _draw_orbit_planes(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         for index, (scale, flattening, tilt) in enumerate(
             ((1.18, 0.28, 0.0), (1.45, 0.42, math.pi / 3), (1.72, 0.2, -math.pi / 4))
@@ -199,7 +249,7 @@ class AtoOrbCanvas:
             )
 
     def _draw_rings(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         for index, scale in enumerate((1.28, 1.48, 1.72, 2.02)):
             ring = radius * scale
@@ -249,7 +299,7 @@ class AtoOrbCanvas:
             )
 
     def _draw_energy_lattice(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         phase = elapsed * profile.speed * 0.7
         spoke_color = _mix(self.theme.background, self.theme.accent, 0.28 + profile.energy * 0.1)
@@ -281,7 +331,7 @@ class AtoOrbCanvas:
         )
 
     def _draw_core(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         for layer in range(9, 0, -1):
             scale = layer / 9
@@ -321,23 +371,25 @@ class AtoOrbCanvas:
         )
 
     def _draw_waveform(
-        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbProfile
+        self, cx: float, cy: float, radius: float, elapsed: float, profile: OrbMotion
     ) -> None:
         points = []
         for index in range(73):
             angle = index / 72 * math.tau
             wave = math.sin(angle * 8 + elapsed * 6.5) * 0.11
             wave += math.sin(angle * 13 - elapsed * 4.2) * 0.045
-            ring = radius * (1.13 + wave * profile.energy)
+            ring = radius * (1.13 + wave * profile.energy * profile.waveform)
             points.extend((cx + math.cos(angle) * ring, cy + math.sin(angle) * ring))
         self.canvas.create_line(
             *points,
-            fill=self.theme.accent_secondary,
-            width=2,
+            fill=_mix(self.theme.background, self.theme.accent_secondary, profile.waveform),
+            width=1 + round(profile.waveform),
             smooth=True,
         )
 
-    def _draw_scan(self, cx: float, cy: float, radius: float, elapsed: float) -> None:
+    def _draw_scan(
+        self, cx: float, cy: float, radius: float, elapsed: float, strength: float
+    ) -> None:
         offset = ((elapsed * 0.7) % 1.0 - 0.5) * radius * 1.7
         half = math.sqrt(max(radius * radius - offset * offset, 0))
         self.canvas.create_line(
@@ -345,10 +397,10 @@ class AtoOrbCanvas:
             cy + offset,
             cx + half,
             cy + offset,
-            fill=self.theme.accent_secondary,
+            fill=_mix(self.theme.background, self.theme.accent_secondary, strength),
             width=1,
         )
-        glow = _mix(self.theme.background, self.theme.accent_secondary, 0.16)
+        glow = _mix(self.theme.background, self.theme.accent_secondary, 0.16 * strength)
         for distance in (5, 10, 16):
             self.canvas.create_line(
                 cx - half,
