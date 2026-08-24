@@ -416,6 +416,9 @@ The default desktop theme is the original Ato HUD. Its central orb is rendered l
 vector primitives—no Marvel artwork, copied JARVIS assets, external images, or remote animation
 libraries are used. Layered elliptical rings rotate in opposite directions, the core pulses, local
 particles orbit the center, and state-specific waveform and scan effects change its behavior.
+The polished core adds three tilted orbital planes, moving energy nodes and trails, segmented HUD
+ticks, a rotating inner lattice, radial energy filaments, multi-layer shell arcs, a faint targeting
+field, and a broader processing scan glow while retaining Ato's restrained cyan-and-amber identity.
 
 The thread-safe visual model defines these real backend states:
 
