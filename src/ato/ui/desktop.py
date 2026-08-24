@@ -744,8 +744,8 @@ class AtoDesktop:
                 lines = self.controller.knowledge_snapshot()
             elif section == "WORKSPACE":
                 lines = (
-                    "Choose SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or TESTS. "
-                    "All actions are bounded; verification never applies fixes.",
+                    "Choose LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, "
+                    "LINT, or TESTS. All actions are bounded; verification never applies fixes.",
                 )
             elif section == "RESEARCH":
                 lines = (
@@ -776,12 +776,27 @@ class AtoDesktop:
 
         action = simpledialog.askstring(
             "Inspect workspace",
-            "Action: SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or TESTS",
+            "Action: LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or "
+            "TESTS",
             parent=self.root,
         )
         if action is None or not action.strip():
             return
         normalized = action.strip().casefold()
+        if normalized in {"list", "read"}:
+            prompt = (
+                "Relative directory path (blank for project root):"
+                if normalized == "list"
+                else "Relative UTF-8 text file path:"
+            )
+            path = simpledialog.askstring(
+                "List workspace files" if normalized == "list" else "Read text file",
+                prompt,
+                parent=self.root,
+            )
+            if path is not None and (normalized == "list" or path.strip()):
+                self._start_file_inspection(normalized, path)
+            return
         if normalized == "syntax":
             path = simpledialog.askstring(
                 "Python syntax check",
@@ -814,6 +829,49 @@ class AtoDesktop:
             tool="READ-ONLY FILE SEARCH",
         )
         threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _start_file_inspection(self, action: str, path: str) -> None:
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Listing workspace files" if action == "list" else "Reading text file",
+            tool="READ-ONLY FILE LIST" if action == "list" else "READ-ONLY TEXT VIEW",
+        )
+        threading.Thread(
+            target=self._run_file_inspection,
+            args=(action, path),
+            daemon=True,
+        ).start()
+
+    def _run_file_inspection(self, action: str, path: str) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = (
+                self.controller.workspace_search.list_files(path)
+                if action == "list"
+                else self.controller.workspace_search.read_text_file(path)
+            )
+        except AtoError as exc:
+            self.root.after(0, self._finish_file_inspection, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_file_inspection, None, "File inspection failed safely.")
+        else:
+            self.root.after(0, self._finish_file_inspection, result, None)
+
+    def _finish_file_inspection(
+        self, result: WorkspaceInspectionResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"FILE INSPECTION ERROR\n{error}",))
+            return
+        assert result is not None
+        heading = result.label + ("\nDISPLAY OUTPUT TRUNCATED" if result.truncated else "")
+        self._show_read_only_lines((heading, result.text))
 
     def _start_code_inspection(self, action: str, path: str | None = None) -> None:
         self._busy = True
