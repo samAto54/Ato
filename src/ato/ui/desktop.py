@@ -19,6 +19,7 @@ from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager
 from ato.tools import build_read_only_registry
 from ato.tools.system import collect_system_info
+from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
@@ -51,6 +52,7 @@ class DesktopChatController:
     speech_service: DesktopSpeechService | None = None
     voice_turn_service: DesktopVoiceTurnService | None = None
     workspace_search: DesktopWorkspaceSearch | None = None
+    activity_reader: AuditActivityReader | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -122,6 +124,14 @@ class DesktopChatController:
             f"RAM  {used_percent}% USED" if used_percent is not None else "RAM  UNAVAILABLE",
             "NETWORK  NOT PROBED",
         )
+
+    def activity_snapshot(self) -> tuple[str, ...]:
+        if self.activity_reader is None:
+            return ("Audit activity is not configured.",)
+        events = self.activity_reader.recent()
+        if not events:
+            return ("No audited tool activity yet.",)
+        return tuple(event.display() for event in events)
 
 
 class AtoDesktop:
@@ -707,8 +717,10 @@ class AtoDesktop:
                 lines = ("Choose a literal search term to inspect the authorized workspace.",)
             elif section == "RESEARCH":
                 lines = ("Desktop research is locked until GUI permission dialogs are available.",)
+            elif section == "ACTIVITY":
+                lines = self.controller.activity_snapshot()
             else:
-                lines = ("Desktop tool activity is locked. Use the terminal for audited tools.",)
+                lines = ("This desktop section is unavailable.",)
             self._show_read_only_lines(lines)
             if section == "WORKSPACE":
                 self.root.after(0, self._start_workspace_search)
@@ -881,6 +893,7 @@ def main() -> None:
                 AuditLogger(settings.audit_file),
             )
         )
+        activity_reader = AuditActivityReader(settings.audit_file)
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -891,6 +904,7 @@ def main() -> None:
                 speech_service,
                 voice_turn_service,
                 workspace_search,
+                activity_reader,
             ),
             permission_bridge=permission_bridge,
         ).run()
