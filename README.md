@@ -80,6 +80,7 @@ The current build provides:
 - Audited read-only literal workspace search in the desktop HUD with bounded result display
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
+- Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -308,7 +309,9 @@ The desktop sidebar is functional: Chat restores the 20 most recent messages, wh
 Knowledge show bounded read-only local snapshots. Workspace runs the existing bounded literal file
 search through its LOW-permission audit path and displays at most 100 matches. Research provides a
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
-external evidence. Activity shows only
+external evidence. A selected result can be fetched only after a second MEDIUM confirmation;
+redirects, private networks, credentialed URLs, oversized responses, and unsupported content are
+blocked, and displayed page text is capped at 20,000 characters. Activity shows only
 bounded audit metadata—never raw arguments, content, transcripts, or error details. Research displays an explicit locked
 states until GUI tool confirmations are available. Mutating memory, knowledge, research, and tool
 operations remain confined to the permission-controlled terminal interface for now.
