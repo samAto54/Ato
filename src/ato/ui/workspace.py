@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ato.exceptions import ToolError
 from ato.tools import ToolRegistry
@@ -46,11 +46,36 @@ class WorkspaceChangeResult:
     checkpoint_id: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class WorkspaceCheckpoint:
+    id: int
+    path: str
+    original_sha256: str
+    updated_sha256: str
+    created_at: str
+    restored: bool
+
+    def display(self) -> str:
+        status = "RESTORED" if self.restored else "AVAILABLE"
+        return (
+            f"#{self.id}  {status}  {self.created_at}\n{self.path}\n"
+            f"original {self.original_sha256}\nupdated  {self.updated_sha256}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceRollbackResult:
+    checkpoint_id: int
+    path: str
+    restored_sha256: str
+
+
 @dataclass(slots=True)
 class DesktopWorkspaceSearch:
     """Expose fixed inspections and exact preview-bound edits from a private registry."""
 
     registry: ToolRegistry
+    reviewed_checkpoints: dict[int, WorkspaceCheckpoint] = field(default_factory=dict, init=False)
 
     def list_files(self, path: str = ".") -> WorkspaceInspectionResult:
         cleaned = path.strip() or "."
@@ -172,6 +197,78 @@ class DesktopWorkspaceSearch:
         ):
             raise ToolError("Text change returned an invalid result.")
         return WorkspaceChangeResult(path, bytes_written, updated_sha256, checkpoint_id)
+
+    def list_checkpoints(self) -> tuple[WorkspaceCheckpoint, ...]:
+        raw = self.registry.execute(
+            "list_edit_checkpoints",
+            {"limit": 20},
+            user_request="List recent edit checkpoints from the desktop",
+        )
+        try:
+            payload = json.loads(raw)
+            records = payload["checkpoints"]
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ToolError("Checkpoint listing returned an invalid result.") from exc
+        if not isinstance(records, list) or len(records) > 20:
+            raise ToolError("Checkpoint listing returned an invalid result.")
+        checkpoints = []
+        for raw_record in records:
+            try:
+                checkpoint = WorkspaceCheckpoint(
+                    int(raw_record["id"]),
+                    str(raw_record["path"]),
+                    str(raw_record["original_sha256"]).casefold(),
+                    str(raw_record["updated_sha256"]).casefold(),
+                    str(raw_record["created_at"])[:50],
+                    bool(raw_record["restored"]),
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ToolError("Checkpoint listing returned an invalid result.") from exc
+            if (
+                checkpoint.id < 1
+                or len(checkpoint.original_sha256) != 64
+                or len(checkpoint.updated_sha256) != 64
+            ):
+                raise ToolError("Checkpoint listing returned an invalid result.")
+            checkpoints.append(checkpoint)
+        self.reviewed_checkpoints = {checkpoint.id: checkpoint for checkpoint in checkpoints}
+        return tuple(checkpoints)
+
+    def rollback_checkpoint(self, checkpoint_id: int) -> WorkspaceRollbackResult:
+        checkpoint = self.reviewed_checkpoints.get(checkpoint_id)
+        if checkpoint is None:
+            raise ToolError("List checkpoints before selecting one for rollback.")
+        if checkpoint.restored:
+            raise ToolError("The selected checkpoint is already restored.")
+        raw = self.registry.execute(
+            "rollback_text_edit",
+            {"checkpoint_id": checkpoint_id},
+            user_request=f"Restore reviewed checkpoint #{checkpoint_id} for {checkpoint.path}",
+        )
+        try:
+            payload = json.loads(raw)
+            result = WorkspaceRollbackResult(
+                int(payload["checkpoint_id"]),
+                str(payload["path"]),
+                str(payload["restored_sha256"]).casefold(),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ToolError("Checkpoint rollback returned an invalid result.") from exc
+        if (
+            result.checkpoint_id != checkpoint.id
+            or result.path != checkpoint.path
+            or result.restored_sha256 != checkpoint.original_sha256
+        ):
+            raise ToolError("Checkpoint rollback returned an invalid result.")
+        self.reviewed_checkpoints[checkpoint_id] = WorkspaceCheckpoint(
+            checkpoint.id,
+            checkpoint.path,
+            checkpoint.original_sha256,
+            checkpoint.updated_sha256,
+            checkpoint.created_at,
+            True,
+        )
+        return result
 
     def search(self, query: str) -> WorkspaceSearchResult:
         cleaned = " ".join(query.split())

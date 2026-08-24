@@ -143,6 +143,60 @@ def test_desktop_never_applies_truncated_preview() -> None:
         DesktopWorkspaceSearch(Registry()).apply_text_change(preview)
 
 
+def test_desktop_lists_reviewed_checkpoint_then_rolls_back_once(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\n", encoding="utf-8")
+    store = SqliteEditCheckpointStore(tmp_path / "data" / "checkpoints.db")
+    service = DesktopWorkspaceSearch(
+        build_read_only_registry(
+            tmp_path,
+            PermissionManager(lambda request: True),
+            checkpoint_store=store,
+        )
+    )
+    preview = service.preview_text_change("module.py", "old", "new")
+    service.apply_text_change(preview)
+    checkpoints = service.list_checkpoints()
+    assert checkpoints[0].path == "module.py"
+    assert checkpoints[0].restored is False
+    result = service.rollback_checkpoint(checkpoints[0].id)
+    assert result.path == "module.py"
+    assert path.read_text(encoding="utf-8") == "old\n"
+    with pytest.raises(ToolError, match="already restored"):
+        service.rollback_checkpoint(checkpoints[0].id)
+
+
+def test_desktop_rollback_requires_checkpoint_in_latest_reviewed_list(tmp_path) -> None:
+    service = DesktopWorkspaceSearch(
+        build_read_only_registry(
+            tmp_path,
+            PermissionManager(lambda request: pytest.fail("unreviewed rollback must not prompt")),
+            checkpoint_store=SqliteEditCheckpointStore(tmp_path / "checkpoints.db"),
+        )
+    )
+    with pytest.raises(ToolError, match="List checkpoints"):
+        service.rollback_checkpoint(1)
+
+
+def test_desktop_rollback_refuses_newer_file_changes(tmp_path) -> None:
+    path = tmp_path / "module.py"
+    path.write_text("old\n", encoding="utf-8")
+    service = DesktopWorkspaceSearch(
+        build_read_only_registry(
+            tmp_path,
+            PermissionManager(lambda request: True),
+            checkpoint_store=SqliteEditCheckpointStore(tmp_path / "checkpoints.db"),
+        )
+    )
+    preview = service.preview_text_change("module.py", "old", "new")
+    service.apply_text_change(preview)
+    checkpoint = service.list_checkpoints()[0]
+    path.write_text("newer work\n", encoding="utf-8")
+    with pytest.raises(ToolError, match="newer work"):
+        service.rollback_checkpoint(checkpoint.id)
+    assert path.read_text(encoding="utf-8") == "newer work\n"
+
+
 @pytest.mark.parametrize("query", ["", "   ", "x" * 1_001])
 def test_desktop_workspace_search_validates_query_before_execution(query) -> None:
     class Registry:
