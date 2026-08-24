@@ -29,6 +29,24 @@ def test_desktop_workspace_search_reuses_bounded_audited_tool(tmp_path) -> None:
     assert event["decision"] == "ALLOW"
 
 
+def test_desktop_text_creation_is_confirmed_and_never_overwrites(tmp_path) -> None:
+    requests = []
+    service = DesktopWorkspaceSearch(
+        build_read_only_registry(
+            tmp_path,
+            PermissionManager(lambda request: requests.append(request) or True),
+        )
+    )
+
+    result = service.create_text_file("exports/chat.txt", "Ato conversation export\n")
+
+    assert result.path == "exports/chat.txt"
+    assert result.bytes_written == 24
+    assert requests[0].tool_name == "create_text_file"
+    with pytest.raises(ToolError, match="already exists"):
+        service.create_text_file("exports/chat.txt", "replacement")
+
+
 def test_desktop_file_listing_and_text_read_reuse_bounded_tools(tmp_path) -> None:
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "main.py").write_text("print('Ato')\n", encoding="utf-8")
