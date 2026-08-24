@@ -11,7 +11,11 @@ import zipfile
 from pathlib import Path
 
 PROJECT_NAME = "ato-agent"
-REQUIRED_SCRIPTS = {"ato": "ato.main:main", "ato-gui": "ato.ui.desktop:main"}
+REQUIRED_SCRIPTS = {
+    "ato": "ato.main:main",
+    "ato-gui": "ato.ui.desktop:main",
+    "ato-doctor": "ato.doctor:main",
+}
 
 
 def source_version(root: Path) -> str:
