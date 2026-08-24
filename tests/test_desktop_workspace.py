@@ -92,3 +92,57 @@ def test_desktop_git_inspection_rejects_nonzero_command_result() -> None:
 
     with pytest.raises(ToolError, match="failed safely"):
         DesktopWorkspaceSearch(Registry()).inspect_git("log")
+
+
+def test_desktop_syntax_check_formats_valid_and_invalid_results() -> None:
+    class Registry:
+        def __init__(self) -> None:
+            self.valid = True
+
+        def execute(self, name, arguments, user_request=None):
+            assert name == "python_syntax_check"
+            assert arguments == {"path": "src/ato.py"}
+            if self.valid:
+                return json.dumps({"valid": True})
+            return json.dumps({"valid": False, "line": 4, "offset": 2, "message": "bad syntax"})
+
+    registry = Registry()
+    service = DesktopWorkspaceSearch(registry)
+    assert "parsed successfully" in service.check_syntax("src/ato.py").text
+    registry.valid = False
+    assert service.check_syntax("src/ato.py").text == "src/ato.py:4:2\nbad syntax"
+
+
+@pytest.mark.parametrize(
+    ("action", "tool_name", "label"),
+    [("lint", "lint_project", "RUFF LINT"), ("tests", "test_project", "PYTEST")],
+)
+def test_desktop_code_checks_use_fixed_registry_actions(action, tool_name, label) -> None:
+    class Registry:
+        def execute(self, name, arguments, user_request=None):
+            assert name == tool_name
+            assert arguments == {}
+            return json.dumps({"exit_code": 0, "output": "passed", "truncated": False})
+
+    result = DesktopWorkspaceSearch(Registry()).run_code_check(action)
+    assert result.label == f"{label} - PASSED"
+    assert result.text == "passed"
+
+
+def test_desktop_code_check_reports_failure_without_generic_tool_error() -> None:
+    class Registry:
+        def execute(self, *args, **kwargs):
+            return json.dumps({"exit_code": 1, "output": "test failed", "truncated": False})
+
+    result = DesktopWorkspaceSearch(Registry()).run_code_check("tests")
+    assert result.label == "PYTEST - FAILED (EXIT 1)"
+    assert result.text == "test failed"
+
+
+def test_desktop_code_check_rejects_unknown_action() -> None:
+    class Registry:
+        def execute(self, *args, **kwargs):
+            pytest.fail("unknown action must not execute")
+
+    with pytest.raises(ToolError, match="Unknown"):
+        DesktopWorkspaceSearch(Registry()).run_code_check("format")

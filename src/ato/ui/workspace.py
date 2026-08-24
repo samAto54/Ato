@@ -101,3 +101,61 @@ class DesktopWorkspaceSearch:
             output[:MAX_GUI_INSPECTION_CHARS] or "No output.",
             display_truncated,
         )
+
+    def check_syntax(self, path: str) -> WorkspaceInspectionResult:
+        cleaned = path.strip()
+        if not cleaned or len(cleaned) > 500:
+            raise ToolError("Python syntax checking requires a bounded relative path.")
+        raw = self.registry.execute(
+            "python_syntax_check",
+            {"path": cleaned},
+            user_request="Check one Python file from the desktop",
+        )
+        try:
+            payload = json.loads(raw)
+            valid = payload["valid"]
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ToolError("Python syntax check returned an invalid result.") from exc
+        if not isinstance(valid, bool):
+            raise ToolError("Python syntax check returned an invalid result.")
+        if valid:
+            output = f"{cleaned} parsed successfully without execution."
+        else:
+            try:
+                line = int(payload["line"])
+                offset = int(payload["offset"])
+                message = " ".join(str(payload["message"]).split())[:500]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ToolError("Python syntax check returned an invalid result.") from exc
+            output = f"{cleaned}:{line}:{offset}\n{message}"
+        return WorkspaceInspectionResult("PYTHON SYNTAX CHECK", output, False)
+
+    def run_code_check(self, action: str) -> WorkspaceInspectionResult:
+        normalized = action.strip().casefold()
+        definitions = {
+            "lint": ("lint_project", "RUFF LINT"),
+            "tests": ("test_project", "PYTEST"),
+        }
+        definition = definitions.get(normalized)
+        if definition is None:
+            raise ToolError("Unknown code verification action.")
+        tool_name, label = definition
+        raw = self.registry.execute(
+            tool_name,
+            {},
+            user_request=f"Run fixed {label.casefold()} verification from the desktop",
+        )
+        try:
+            payload = json.loads(raw)
+            exit_code = int(payload["exit_code"])
+            output = str(payload["output"])
+            truncated = bool(payload["truncated"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ToolError("Code verification returned an invalid result.") from exc
+        display_truncated = truncated or len(output) > MAX_GUI_INSPECTION_CHARS
+        status = "PASSED" if exit_code == 0 else f"FAILED (EXIT {exit_code})"
+        return WorkspaceInspectionResult(
+            f"{label} - {status}",
+            output[:MAX_GUI_INSPECTION_CHARS] or "No output.",
+            display_truncated,
+        )
