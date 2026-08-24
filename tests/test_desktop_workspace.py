@@ -28,6 +28,35 @@ def test_desktop_workspace_search_reuses_bounded_audited_tool(tmp_path) -> None:
     assert event["decision"] == "ALLOW"
 
 
+def test_desktop_file_listing_and_text_read_reuse_bounded_tools(tmp_path) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print('Ato')\n", encoding="utf-8")
+    service = DesktopWorkspaceSearch(build_read_only_registry(tmp_path))
+    listing = service.list_files("src")
+    assert listing.text == "src/main.py"
+    assert listing.truncated is False
+    viewed = service.read_text_file("src/main.py")
+    assert viewed.text == "print('Ato')\n"
+    assert viewed.label == "READ-ONLY TEXT - src/main.py"
+
+
+def test_desktop_file_inspection_preserves_workspace_boundary(tmp_path) -> None:
+    outside = tmp_path.parent / "outside-desktop-test.txt"
+    outside.write_text("outside", encoding="utf-8")
+    service = DesktopWorkspaceSearch(build_read_only_registry(tmp_path))
+    with pytest.raises(ToolError, match="outside"):
+        service.read_text_file("../outside-desktop-test.txt")
+
+
+def test_desktop_file_listing_rejects_malformed_result() -> None:
+    class Registry:
+        def execute(self, *args, **kwargs):
+            return json.dumps({"files": "not-a-list", "truncated": False})
+
+    with pytest.raises(ToolError, match="invalid result"):
+        DesktopWorkspaceSearch(Registry()).list_files(".")
+
+
 @pytest.mark.parametrize("query", ["", "   ", "x" * 1_001])
 def test_desktop_workspace_search_validates_query_before_execution(query) -> None:
     class Registry:

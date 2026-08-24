@@ -32,6 +32,49 @@ class DesktopWorkspaceSearch:
 
     registry: ToolRegistry
 
+    def list_files(self, path: str = ".") -> WorkspaceInspectionResult:
+        cleaned = path.strip() or "."
+        if len(cleaned) > 500:
+            raise ToolError("Workspace listing path cannot exceed 500 characters.")
+        raw = self.registry.execute(
+            "list_files",
+            {"path": cleaned, "recursive": True},
+            user_request="List files from the desktop workspace",
+        )
+        try:
+            payload = json.loads(raw)
+            files = payload["files"]
+            truncated = bool(payload["truncated"])
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ToolError("Workspace listing returned an invalid result.") from exc
+        if not isinstance(files, list) or len(files) > 200 or not all(
+            isinstance(item, str) for item in files
+        ):
+            raise ToolError("Workspace listing returned an invalid result.")
+        output = "\n".join(files) or "No files found."
+        display_truncated = truncated or len(output) > MAX_GUI_INSPECTION_CHARS
+        return WorkspaceInspectionResult(
+            f"WORKSPACE FILES - {cleaned}",
+            output[:MAX_GUI_INSPECTION_CHARS],
+            display_truncated,
+        )
+
+    def read_text_file(self, path: str) -> WorkspaceInspectionResult:
+        cleaned = path.strip()
+        if not cleaned or len(cleaned) > 500:
+            raise ToolError("Text reading requires a bounded relative file path.")
+        output = self.registry.execute(
+            "read_text_file",
+            {"path": cleaned},
+            user_request="Read one text file from the desktop workspace",
+        )
+        display_truncated = len(output) > MAX_GUI_INSPECTION_CHARS
+        return WorkspaceInspectionResult(
+            f"READ-ONLY TEXT - {cleaned}",
+            output[:MAX_GUI_INSPECTION_CHARS] or "File is empty.",
+            display_truncated,
+        )
+
     def search(self, query: str) -> WorkspaceSearchResult:
         cleaned = " ".join(query.split())
         if not cleaned:

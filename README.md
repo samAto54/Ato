@@ -80,6 +80,7 @@ The current build provides:
 - Audited read-only literal workspace search in the desktop HUD with bounded result display
 - Audited desktop Git status, diff, staged diff, recent log, and local-branch inspection
 - Desktop Python syntax checks plus confirmed fixed Ruff and pytest verification
+- Bounded desktop workspace file listing and read-only UTF-8 text viewing
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
@@ -307,7 +308,9 @@ Markup characters are removed for readability, unsupported control characters ar
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
 The desktop sidebar is functional: Chat restores the 20 most recent messages, while Memory and
 Knowledge show bounded read-only local snapshots. Workspace runs the existing bounded literal file
-search through its LOW-permission audit path and displays at most 100 matches. It also exposes fixed
+search through its LOW-permission audit path and displays at most 100 matches. It can list at most
+200 workspace files and display up to 20,000 characters from one bounded UTF-8 text file. Internal
+Git, virtual-environment, and cache directories remain excluded from listings. It also exposes fixed
 read-only Git status, diff, staged diff, 20-entry log, and local branch views; it accepts no command
 text or flags and caps displayed output at 20,000 characters. It can also parse one Python file
 without execution, run fixed non-fixing Ruff after MEDIUM confirmation, and run fixed pytest after
