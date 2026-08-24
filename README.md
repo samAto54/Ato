@@ -76,6 +76,7 @@ The current build provides:
 - An original full-screen Ato HUD centered on an animated, backend-driven AI visual core
 - A fail-closed, thread-safe GUI permission bridge with secret-redacted confirmation previews
 - Optional audited desktop `SPEAK LAST` playback with real `TOOL_EXECUTION` and `SPEAKING` states
+- Reviewed one-shot desktop voice turns with real `LISTENING` and local `PROCESSING` states
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -327,7 +328,11 @@ When `ATO_VOICE_ENABLED=true`, **SPEAK LAST** reads only the newest assistant re
 Windows speech after HIGH confirmation. The HUD enters `TOOL_EXECUTION` while awaiting approval,
 then `SPEAKING` only after approval and returns to `IDLE` when playback ends. The action is audited,
 the reply is represented by a hash and character count in the audit log, and playback is never
-automatic. Microphone capture and all other desktop tools remain locked. The right HUD
+automatic. When both `ATO_VOICE_ENABLED=true` and `ATO_STT_MODEL_PATH` point to an existing local
+faster-whisper model, **VOICE TURN** records one explicitly timed clip after CRITICAL confirmation,
+requests HIGH confirmation for offline transcription, and places the transcript in the composer.
+The user must review, edit, and manually send it; Ato never listens in the background or submits a
+transcript automatically. All other desktop tools remain locked. The right HUD
 shows the active task, locked tool channel, and privacy-reduced local OS/CPU/RAM data; network status
 is explicitly `NOT PROBED`. The bottom microphone control also remains visibly locked. Press `F11`
 to toggle full screen and `Esc` to leave it. Switching to Standard hides the cinematic orb and right

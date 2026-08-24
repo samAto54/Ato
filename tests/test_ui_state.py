@@ -30,3 +30,12 @@ def test_state_labels_are_single_line_and_bounded() -> None:
     )
     assert "\n" not in snapshot.active_task
     assert len(snapshot.active_task) <= 120
+
+
+def test_permission_state_can_enter_and_leave_listening() -> None:
+    model = AtoStateModel()
+    model.transition(AtoVisualState.TOOL_EXECUTION, tool="MICROPHONE")
+    model.transition(AtoVisualState.LISTENING, tool="MICROPHONE")
+    model.transition(AtoVisualState.TOOL_EXECUTION, tool="TRANSCRIPTION")
+    model.transition(AtoVisualState.PROCESSING, tool="TRANSCRIPTION")
+    assert model.snapshot().state is AtoVisualState.PROCESSING
