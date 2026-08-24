@@ -81,6 +81,7 @@ The current build provides:
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
+- Manual grounded questions over one fetched source without persisting full page text in chat memory
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -293,15 +294,12 @@ Run the first native desktop interface after installing the package:
 ato-gui
 ```
 
-The window provides persisted text chat, recent-history restoration, subsystem navigation placeholders,
-status indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
-Model requests run off the Tk event loop so the window remains responsive. This first GUI increment is
-deliberately chat-only: tool execution and permission prompts remain locked in the desktop shell until a
-thread-safe confirmation bridge is added. A visible header badge communicates this state, and the
-desktop-specific system policy prohibits claims that unavailable browsing, filesystem, command, or
-other tool actions were performed. Use the terminal `ato` command for the full tool system. The
-bottom composer is reserved before the expanding transcript so input controls remain visible at
-supported window sizes.
+The window provides persisted text chat, recent-history restoration, subsystem navigation, status
+indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
+Model requests run off the Tk event loop so the window remains responsive. A thread-safe permission
+bridge protects the narrowly enabled voice, workspace-search, and research controls. The language
+model itself receives no autonomous desktop tools, and file mutation, commands, Git actions, and
+other capabilities remain confined to the permission-controlled terminal interface.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
@@ -311,10 +309,12 @@ search through its LOW-permission audit path and displays at most 100 matches. R
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
 external evidence. A selected result can be fetched only after a second MEDIUM confirmation;
 redirects, private networks, credentialed URLs, oversized responses, and unsupported content are
-blocked, and displayed page text is capped at 20,000 characters. Activity shows only
-bounded audit metadata—never raw arguments, content, transcripts, or error details. Research displays an explicit locked
-states until GUI tool confirmations are available. Mutating memory, knowledge, research, and tool
-operations remain confined to the permission-controlled terminal interface for now.
+blocked, and displayed page text is capped at 20,000 characters. After fetching, the user may
+manually ask one question about that source. Ato receives the page in an escaped untrusted-evidence
+envelope, must cite the exact source URL, and persists only the question and answer—not the full page
+text—in conversation memory. Activity shows only bounded audit metadata—never raw arguments,
+content, transcripts, or error details. Mutating memory, knowledge, files, Git state, and other
+tools remain confined to the permission-controlled terminal interface for now.
 
 ### Cinematic Ato HUD
 

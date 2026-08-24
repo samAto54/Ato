@@ -7,6 +7,7 @@ from ato.brain.messages import Message
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController
+from ato.ui.research import ResearchPage
 
 
 class EchoLLM:
@@ -31,10 +32,36 @@ def test_desktop_controller_rejects_empty_message() -> None:
 
 def test_desktop_policy_forbids_claims_of_unavailable_tool_use() -> None:
     policy = " ".join(DESKTOP_SYSTEM_PROMPT.split())
-    assert "chat-only" in policy
-    assert "provides no tools" in policy
-    assert "Never claim that you performed an unavailable action" in policy
-    assert "browse or fetch web pages" in policy
+    assert "no autonomous tools" in policy
+    assert "must never claim that you initiated them" in policy
+    assert "cannot change files" in policy
+
+
+def test_desktop_research_question_persists_question_not_source_text(tmp_path) -> None:
+    class CapturingLLM:
+        def __init__(self) -> None:
+            self.messages = ()
+
+        def generate(self, messages, tools=None):
+            del tools
+            self.messages = tuple(messages)
+            return "Grounded answer [https://example.com/source]."
+
+    llm = CapturingLLM()
+    store = JsonMemoryStore(tmp_path / "memory.json")
+    controller = DesktopChatController(Agent(llm), store)
+    page = ResearchPage(
+        "Source",
+        "https://example.com/source",
+        "Fetched evidence that should remain temporary.",
+        "webpage",
+        False,
+    )
+    controller.submit_research_question("What is supported?", page)
+    assert any("untrusted external JSON evidence" in message.content for message in llm.messages)
+    persisted = "\n".join(message.content for message in store.load_history())
+    assert "What is supported?" in persisted
+    assert "Fetched evidence" not in persisted
 
 
 def test_desktop_controller_exposes_bounded_read_only_sidebar_snapshots(tmp_path) -> None:
