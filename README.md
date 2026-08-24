@@ -81,6 +81,7 @@ The current build provides:
 - Audited desktop Git status, diff, staged diff, recent log, and local-branch inspection
 - Desktop Python syntax checks plus confirmed fixed Ruff and pytest verification
 - Bounded desktop workspace file listing and read-only UTF-8 text viewing
+- Read-only exact text-change previews with bounded diffs and SHA-256 fingerprints
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
@@ -315,6 +316,9 @@ read-only Git status, diff, staged diff, 20-entry log, and local branch views; i
 text or flags and caps displayed output at 20,000 characters. It can also parse one Python file
 without execution, run fixed non-fixing Ruff after MEDIUM confirmation, and run fixed pytest after
 HIGH confirmation. Verification output is bounded and failed checks are reported explicitly.
+The PREVIEW action validates one exact unique text match and displays a bounded unified diff plus
+original and proposed SHA-256 fingerprints. It never writes, and applying the preview remains
+disabled in this increment.
 Research provides a
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
 external evidence. A selected result can be fetched only after a second MEDIUM confirmation;

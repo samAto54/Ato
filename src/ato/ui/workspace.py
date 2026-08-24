@@ -10,6 +10,7 @@ from ato.tools import ToolRegistry
 
 MAX_GUI_SEARCH_RESULTS = 100
 MAX_GUI_INSPECTION_CHARS = 20_000
+MAX_GUI_REPLACEMENT_CHARS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +24,15 @@ class WorkspaceSearchResult:
 class WorkspaceInspectionResult:
     label: str
     text: str
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceChangePreview:
+    path: str
+    diff: str
+    original_sha256: str
+    updated_sha256: str
     truncated: bool
 
 
@@ -72,6 +82,49 @@ class DesktopWorkspaceSearch:
         return WorkspaceInspectionResult(
             f"READ-ONLY TEXT - {cleaned}",
             output[:MAX_GUI_INSPECTION_CHARS] or "File is empty.",
+            display_truncated,
+        )
+
+    def preview_text_change(
+        self,
+        path: str,
+        old_text: str,
+        new_text: str,
+    ) -> WorkspaceChangePreview:
+        cleaned_path = path.strip()
+        if not cleaned_path or len(cleaned_path) > 500:
+            raise ToolError("Change preview requires a bounded relative file path.")
+        if not old_text or len(old_text) > MAX_GUI_REPLACEMENT_CHARS:
+            raise ToolError("Existing text must contain 1-10,000 characters.")
+        if len(new_text) > MAX_GUI_REPLACEMENT_CHARS:
+            raise ToolError("Replacement text cannot exceed 10,000 characters.")
+        raw = self.registry.execute(
+            "preview_text_change",
+            {"path": cleaned_path, "old_text": old_text, "new_text": new_text},
+            user_request="Preview one exact text replacement from the desktop",
+        )
+        try:
+            payload = json.loads(raw)
+            result_path = str(payload["path"])
+            original_sha256 = str(payload["original_sha256"])
+            updated_sha256 = str(payload["updated_sha256"])
+            diff = str(payload["diff"])
+            truncated = bool(payload["diff_truncated"])
+        except (KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise ToolError("Text change preview returned an invalid result.") from exc
+        if (
+            len(original_sha256) != 64
+            or len(updated_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in original_sha256.casefold())
+            or any(character not in "0123456789abcdef" for character in updated_sha256.casefold())
+        ):
+            raise ToolError("Text change preview returned an invalid result.")
+        display_truncated = truncated or len(diff) > MAX_GUI_INSPECTION_CHARS
+        return WorkspaceChangePreview(
+            result_path,
+            diff[:MAX_GUI_INSPECTION_CHARS],
+            original_sha256.casefold(),
+            updated_sha256.casefold(),
             display_truncated,
         )
 
