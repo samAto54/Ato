@@ -35,6 +35,7 @@ from ato.ui.research import (
     ResearchSearchResult,
     ResearchSource,
 )
+from ato.ui.settings_dialog import DesktopCapabilities, SettingsDialog
 from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
@@ -201,6 +202,7 @@ class AtoDesktop:
         self.state_model = AtoStateModel()
         self._fullscreen = False
         self._workspace_palette: WorkspaceActionPalette | None = None
+        self._settings_dialog: SettingsDialog | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
         self._build()
         self._apply_theme()
@@ -525,23 +527,16 @@ class AtoDesktop:
         return "break"
 
     def _show_settings(self) -> None:
-        from tkinter import messagebox
-
-        messagebox.showinfo(
-            "Ato interface settings",
-            "Theme: "
-            f"{self.theme.display_name}\n\nF11: toggle full screen\nEsc: leave full screen\n"
-            "Ctrl+Enter: send message\n\n"
-            + (
-                "SPEAK LAST and reviewed one-shot voice turns are enabled with confirmation. "
-                "Background listening and other GUI tools remain locked."
-                if self.controller.voice_turn_service is not None
-                else "SPEAK LAST is enabled with confirmation. Microphone and other GUI tools "
-                "remain locked."
-                if self.controller.speech_service is not None
-                else "Voice and GUI tools remain locked until explicitly enabled."
+        self._settings_dialog = SettingsDialog(
+            self.root,
+            self.theme,
+            DesktopCapabilities(
+                voice_input=self.controller.voice_turn_service is not None,
+                voice_output=self.controller.speech_service is not None,
             ),
-            parent=self.root,
+            fullscreen=self._fullscreen,
+            on_toggle_theme=self._toggle_theme,
+            on_toggle_fullscreen=lambda: self._toggle_fullscreen(),
         )
 
     def _ask_permission(self, prompt: GuiPermissionPrompt) -> bool:
@@ -549,6 +544,8 @@ class AtoDesktop:
         return show_permission_dialog(self.root, self.theme, prompt)
 
     def _close(self) -> None:
+        if self._settings_dialog is not None:
+            self._settings_dialog.close()
         if self._workspace_palette is not None:
             self._workspace_palette.close()
         if self.permission_bridge is not None:

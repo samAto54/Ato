@@ -8,6 +8,7 @@ from ato.ui.desktop import AtoDesktop, DesktopChatController
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import PermissionDialog
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
+from ato.ui.settings_dialog import DesktopCapabilities, SettingsDialog
 from ato.ui.state import AtoVisualState
 from ato.ui.themes import ThemeId
 
@@ -63,6 +64,18 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     assert permission.window.winfo_exists() == 1
     permission.deny()
     assert permission.result is False
+
+    settings = SettingsDialog(
+        desktop.root,
+        desktop.theme,
+        DesktopCapabilities(voice_input=False, voice_output=False),
+        fullscreen=False,
+        on_toggle_theme=lambda: None,
+        on_toggle_fullscreen=lambda: None,
+    )
+    desktop.root.update_idletasks()
+    assert settings.window.winfo_exists() == 1
+    settings.close()
     assert bridge.attached is True
     desktop._close()
     assert bridge.attached is False
