@@ -77,6 +77,7 @@ The current build provides:
 - A fail-closed, thread-safe GUI permission bridge with secret-redacted confirmation previews
 - Optional audited desktop `SPEAK LAST` playback with real `TOOL_EXECUTION` and `SPEAKING` states
 - Reviewed one-shot desktop voice turns with real `LISTENING` and local `PROCESSING` states
+- Audited read-only literal workspace search in the desktop HUD with bounded result display
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -302,7 +303,8 @@ Desktop responses use a small inert formatter for headings, bold text, inline co
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
 The desktop sidebar is functional: Chat restores the 20 most recent messages, while Memory and
-Knowledge show bounded read-only local snapshots. Research and Activity display explicit locked
+Knowledge show bounded read-only local snapshots. Workspace runs the existing bounded literal file
+search through its LOW-permission audit path and displays at most 100 matches. Research and Activity display explicit locked
 states until GUI tool confirmations are available. Mutating memory, knowledge, research, and tool
 operations remain confined to the permission-controlled terminal interface for now.
 

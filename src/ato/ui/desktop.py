@@ -17,6 +17,7 @@ from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
 from ato.security import AuditLogger, PermissionManager
+from ato.tools import build_read_only_registry
 from ato.tools.system import collect_system_info
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
@@ -25,6 +26,7 @@ from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
 from ato.ui.voice_turn import DesktopVoiceTurnService
+from ato.ui.workspace import DesktopWorkspaceSearch, WorkspaceSearchResult
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
@@ -48,6 +50,7 @@ class DesktopChatController:
     workspace_root: Path | None = None
     speech_service: DesktopSpeechService | None = None
     voice_turn_service: DesktopVoiceTurnService | None = None
+    workspace_search: DesktopWorkspaceSearch | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -178,7 +181,7 @@ class AtoDesktop:
         )
         self.mode_status.pack(fill="x")
         self.nav_buttons = {}
-        for label in ("CHAT", "MEMORY", "KNOWLEDGE", "RESEARCH", "ACTIVITY"):
+        for label in ("CHAT", "MEMORY", "KNOWLEDGE", "WORKSPACE", "RESEARCH", "ACTIVITY"):
             widget = tk.Button(
                 self.sidebar,
                 text=label,
@@ -660,7 +663,9 @@ class AtoDesktop:
         self.tool_value.configure(
             text=snapshot.tool
             or (
-                "PERMISSION BRIDGE READY - TOOLS LOCKED"
+                "READ-ONLY SEARCH READY - OTHER TOOLS LOCKED"
+                if self.controller.workspace_search is not None
+                else "PERMISSION BRIDGE READY - TOOLS LOCKED"
                 if self.permission_bridge is not None and self.permission_bridge.attached
                 else "LOCKED - PERMISSION BRIDGE UNAVAILABLE"
             )
@@ -698,17 +703,72 @@ class AtoDesktop:
                 lines = self.controller.memory_snapshot()
             elif section == "KNOWLEDGE":
                 lines = self.controller.knowledge_snapshot()
+            elif section == "WORKSPACE":
+                lines = ("Choose a literal search term to inspect the authorized workspace.",)
             elif section == "RESEARCH":
                 lines = ("Desktop research is locked until GUI permission dialogs are available.",)
             else:
                 lines = ("Desktop tool activity is locked. Use the terminal for audited tools.",)
             self._show_read_only_lines(lines)
+            if section == "WORKSPACE":
+                self.root.after(0, self._start_workspace_search)
         self._apply_theme()
 
     def _clear_transcript(self) -> None:
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
         self.transcript.configure(state="disabled")
+
+    def _start_workspace_search(self) -> None:
+        if self._busy or self.controller.workspace_search is None:
+            return
+        from tkinter import simpledialog
+
+        query = simpledialog.askstring(
+            "Search workspace",
+            "Literal text to find:",
+            parent=self.root,
+        )
+        if query is None or not query.strip():
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Searching workspace for {query[:60]!r}",
+            tool="READ-ONLY FILE SEARCH",
+        )
+        threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _run_workspace_search(self, query: str) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = self.controller.workspace_search.search(query)
+        except AtoError as exc:
+            self.root.after(0, self._finish_workspace_search, None, str(exc))
+        except Exception:
+            self.root.after(
+                0, self._finish_workspace_search, None, "Workspace search failed safely."
+            )
+        else:
+            self.root.after(0, self._finish_workspace_search, result, None)
+
+    def _finish_workspace_search(
+        self, result: WorkspaceSearchResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"SEARCH ERROR\n{error}",))
+            return
+        assert result is not None
+        summary = (
+            f"{len(result.lines)} matches across {result.files_scanned} scanned files"
+            + (" (results truncated)" if result.truncated else "")
+        )
+        self._show_read_only_lines((summary, *(result.lines or ("No matches found.",))))
 
     def _show_read_only_lines(self, lines: tuple[str, ...]) -> None:
         self.transcript.configure(state="normal")
@@ -814,6 +874,13 @@ def main() -> None:
             if settings.voice_enabled and settings.stt_model_path is not None
             else None
         )
+        workspace_search = DesktopWorkspaceSearch(
+            build_read_only_registry(
+                settings.workspace_root,
+                PermissionManager(permission_bridge.confirm),
+                AuditLogger(settings.audit_file),
+            )
+        )
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -823,6 +890,7 @@ def main() -> None:
                 settings.workspace_root,
                 speech_service,
                 voice_turn_service,
+                workspace_search,
             ),
             permission_bridge=permission_bridge,
         ).run()
