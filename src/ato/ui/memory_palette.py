@@ -12,6 +12,8 @@ MEMORY_ACTIONS = (
     ("refresh", "REFRESH", "Reload memory metadata", "LOW"),
     ("archive", "ARCHIVE", "Hide one memory from retrieval", "HIGH"),
     ("restore", "RESTORE", "Reactivate one archived memory", "HIGH"),
+    ("expire", "SET EXPIRATION", "Exclude after a bounded number of days", "HIGH"),
+    ("clear_expiration", "CLEAR EXPIRATION", "Remove a memory expiry date", "HIGH"),
     ("forget", "FORGET", "Permanently delete one memory", "CRITICAL"),
 )
 

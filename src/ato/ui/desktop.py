@@ -6,6 +6,7 @@ import json
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from ato.brain.agent import Agent
@@ -214,6 +215,14 @@ class DesktopChatController:
         if self.long_term_memory is None:
             raise AtoError("Long-term memory is not configured.")
         return self.long_term_memory.forget(memory_id)
+
+    def set_memory_expiration(self, memory_id: int, days: int | None) -> bool:
+        if self.long_term_memory is None:
+            raise AtoError("Long-term memory is not configured.")
+        if days is not None and not 1 <= days <= 3_650:
+            raise ValueError("Expiration days must be between 1 and 3650.")
+        expires_at = None if days is None else datetime.now(UTC) + timedelta(days=days)
+        return self.long_term_memory.set_expiration(memory_id, expires_at)
 
     def system_snapshot(self) -> tuple[str, ...]:
         if self.workspace_root is None:
@@ -951,6 +960,8 @@ class AtoDesktop:
             self._start_memory_edit()
         elif action == "forget":
             self._start_memory_forget()
+        elif action in {"expire", "clear_expiration"}:
+            self._start_memory_expiration(clear=action == "clear_expiration")
 
     def _memory_record(self, memory_id: int):
         assert self.controller.long_term_memory is not None
@@ -1102,6 +1113,53 @@ class AtoDesktop:
         if approved:
             self._begin_memory_operation("forget", memory_id)
 
+    def _start_memory_expiration(self, *, clear: bool) -> None:
+        from tkinter import messagebox, simpledialog
+
+        memory_id = self._ask_memory_id(
+            "Clear memory expiration" if clear else "Set memory expiration"
+        )
+        if memory_id is None:
+            return
+        record = self._memory_record(memory_id)
+        if record is None:
+            messagebox.showerror("Memory", "That memory ID does not exist.", parent=self.root)
+            return
+        days = None
+        if not clear:
+            days = simpledialog.askinteger(
+                "Set memory expiration",
+                "Days until this memory expires (1-3650):",
+                parent=self.root,
+                minvalue=1,
+                maxvalue=3_650,
+            )
+            if days is None:
+                return
+        approved = show_permission_dialog(
+            self.root,
+            self.theme,
+            GuiPermissionPrompt(
+                "clear_memory_expiration" if clear else "set_memory_expiration",
+                "HIGH",
+                json.dumps(
+                    {
+                        "id": record.id,
+                        "content": record.content,
+                        "days": days,
+                        "effect": (
+                            "Remove the current expiry date"
+                            if clear
+                            else "Exclude this memory from retrieval after the selected period"
+                        ),
+                    },
+                    indent=2,
+                ),
+            ),
+        )
+        if approved:
+            self._begin_memory_operation("clear_expiration" if clear else "expire", memory_id, days)
+
     def _begin_memory_operation(self, action: str, *arguments: object) -> None:
         self._busy = True
         self.state_model.transition(
@@ -1138,9 +1196,19 @@ class AtoDesktop:
                     if item is not None
                     else "MEMORY WAS NOT FOUND"
                 )
-            else:
+            elif action == "forget":
                 forgotten = self.controller.forget_memory(int(arguments[0]))
                 result = "MEMORY FORGOTTEN" if forgotten else "MEMORY WAS NOT FOUND"
+            else:
+                days = None if action == "clear_expiration" else int(arguments[1])
+                changed = self.controller.set_memory_expiration(int(arguments[0]), days)
+                result = (
+                    "MEMORY EXPIRATION CLEARED"
+                    if changed and days is None
+                    else f"MEMORY EXPIRES IN {days} DAYS"
+                    if changed
+                    else "MEMORY WAS NOT FOUND"
+                )
         except (AtoError, ValueError) as exc:
             self.root.after(0, self._finish_memory_operation, None, str(exc))
         except Exception:

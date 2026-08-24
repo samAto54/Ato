@@ -8,6 +8,8 @@ def test_memory_palette_has_only_fixed_risk_labelled_actions() -> None:
         "refresh",
         "archive",
         "restore",
+        "expire",
+        "clear_expiration",
         "forget",
     )
     assert {action[3] for action in MEMORY_ACTIONS} <= {"LOW", "MEDIUM", "HIGH", "CRITICAL"}

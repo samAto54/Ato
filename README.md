@@ -25,7 +25,7 @@ The current build provides:
 - Confirmed desktop New Chat control that retains long-term memory and knowledge
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
-- Themed Memory controls for remembering, editing, archiving, restoring, and forgetting facts
+- Complete themed Memory lifecycle controls, including bounded expiration and permanent forgetting
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -332,6 +332,8 @@ confirmation showing the exact fact and category; Refresh is read-only. Archived
 stored locally but are excluded from normal retrieval until explicitly restored.
 Edit preserves the selected memory ID and shows the old and proposed values before approval. Forget
 is CRITICAL because it permanently removes the selected long-term memory and cannot be undone.
+Set Expiration accepts 1 to 3,650 days; expired facts remain stored but stop participating in normal
+retrieval. Clear Expiration removes that deadline. Both actions require HIGH-risk confirmation.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.

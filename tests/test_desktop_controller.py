@@ -99,6 +99,19 @@ def test_desktop_controller_updates_and_forgets_long_term_memory(tmp_path) -> No
     assert long_term.list_records(include_inactive=True) == ()
 
 
+def test_desktop_controller_sets_and_clears_bounded_memory_expiration(tmp_path) -> None:
+    long_term = SqliteLongTermMemory(tmp_path / "long-term.db")
+    controller = DesktopChatController(Agent(EchoLLM()), long_term_memory=long_term)
+    item = controller.remember_memory("Temporary project decision.", "decision")
+
+    assert controller.set_memory_expiration(item.id, 30) is True
+    assert long_term.list_records(include_inactive=True)[0].expires_at is not None
+    assert controller.set_memory_expiration(item.id, None) is True
+    assert long_term.list_records(include_inactive=True)[0].expires_at is None
+    with pytest.raises(ValueError, match="between 1 and 3650"):
+        controller.set_memory_expiration(item.id, 3_651)
+
+
 def test_desktop_controller_streams_and_persists_completed_turn(tmp_path) -> None:
     store = JsonMemoryStore(tmp_path / "memory.json")
     controller = DesktopChatController(Agent(StreamingLLM()), store)
