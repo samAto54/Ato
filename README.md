@@ -22,6 +22,7 @@ The current build provides:
 - Incremental streaming responses in the terminal
 - Incremental streaming responses in the desktop HUD
 - Cooperative desktop response cancellation with partial-output discard
+- Confirmed desktop New Chat control that retains long-term memory and knowledge
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
 - Configurable context budgeting with deterministic compaction of older turns
@@ -321,6 +322,8 @@ Desktop replies stream into the transcript as provider fragments arrive, then re
 formatter after completion. Conversation memory is saved only when the full stream succeeds.
 While a response is active, **SEND** becomes **STOP**. Stopping closes the response iterator at the
 next provider fragment boundary, discards partial output, and does not commit the interrupted turn.
+**NEW CHAT** requires a HIGH-risk confirmation before clearing the active context and persisted
+recent conversation. It deliberately retains Ato's explicit long-term memories and knowledge base.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
