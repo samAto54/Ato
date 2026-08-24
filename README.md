@@ -419,6 +419,8 @@ particles orbit the center, and state-specific waveform and scan effects change 
 The polished core adds three tilted orbital planes, moving energy nodes and trails, segmented HUD
 ticks, a rotating inner lattice, radial energy filaments, multi-layer shell arcs, a faint targeting
 field, and a broader processing scan glow while retaining Ato's restrained cyan-and-amber identity.
+State changes use frame-time-based easing, so rotation, pulse, energy, waveform, and scan intensity
+ramp naturally as the backend moves between idle, listening, processing, tool, and speaking states.
 
 The thread-safe visual model defines these real backend states:
 
