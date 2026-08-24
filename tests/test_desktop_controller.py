@@ -6,7 +6,13 @@ from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
-from ato.ui.desktop import DESKTOP_SYSTEM_PROMPT, DesktopChatController, DesktopStreamCancelled
+from ato.ui.desktop import (
+    DESKTOP_SYSTEM_PROMPT,
+    SYSTEM_REFRESH_MS,
+    AtoDesktop,
+    DesktopChatController,
+    DesktopStreamCancelled,
+)
 from ato.ui.research import ResearchPage
 
 
@@ -154,4 +160,25 @@ def test_desktop_system_snapshot_is_local_and_does_not_probe_network(tmp_path) -
     lines = controller.system_snapshot()
     assert any(line.startswith("OS  ") for line in lines)
     assert any(line.startswith("CPU  ") for line in lines)
+    assert any(line.startswith("DISK  ") for line in lines)
     assert lines[-1] == "NETWORK  NOT PROBED"
+
+
+def test_desktop_telemetry_completion_updates_and_schedules_next_refresh() -> None:
+    configured = []
+    scheduled = []
+    desktop = object.__new__(AtoDesktop)
+    desktop._system_refreshing = True
+    desktop._closed = False
+    desktop.system_value = type(
+        "LabelStub", (), {"configure": lambda self, **values: configured.append(values)}
+    )()
+    desktop.root = type(
+        "RootStub", (), {"after": lambda self, delay, callback: scheduled.append((delay, callback))}
+    )()
+
+    desktop._finish_system_refresh(("RAM  40% USED", "NETWORK  NOT PROBED"))
+
+    assert configured == [{"text": "RAM  40% USED\nNETWORK  NOT PROBED"}]
+    assert scheduled == [(SYSTEM_REFRESH_MS, desktop._refresh_system_async)]
+    assert desktop._system_refreshing is False

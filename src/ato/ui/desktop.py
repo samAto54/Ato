@@ -60,6 +60,7 @@ claim that you initiated them. Only a user-reviewed exact text preview can chang
 run commands, mutate Git, access the clipboard, or perform other tool actions in this runtime. Treat
 recollections of tool results from earlier turns as historical conversation, not evidence that an
 action is available now."""
+SYSTEM_REFRESH_MS = 5_000
 
 
 class DesktopStreamCancelled(AtoError):
@@ -183,10 +184,20 @@ class DesktopChatController:
             if total and available is not None
             else None
         )
+        disk = info["workspace_disk_bytes"]
+        disk_total = disk["total"]
+        disk_used_percent = (
+            round(int(disk["used"]) / int(disk_total) * 100) if disk_total else None
+        )
         return (
             f"OS  {info['os']['system']} {info['os']['release']}",
             f"CPU  {info['cpu']['logical_cores'] or '?'} LOGICAL CORES",
             f"RAM  {used_percent}% USED" if used_percent is not None else "RAM  UNAVAILABLE",
+            (
+                f"DISK  {disk_used_percent}% USED"
+                if disk_used_percent is not None
+                else "DISK  UNAVAILABLE"
+            ),
             "NETWORK  NOT PROBED",
         )
 
@@ -237,12 +248,15 @@ class AtoDesktop:
         self._stream_visible = False
         self._stream_active = False
         self._stream_cancel = threading.Event()
+        self._closed = False
+        self._system_refreshing = False
         self._build()
         self._apply_theme()
         self._restore_visible_history()
         self.root.bind("<F11>", self._toggle_fullscreen)
         self.root.bind("<Escape>", self._leave_fullscreen)
         self._refresh_hud()
+        self._refresh_system_async()
 
     def _build(self) -> None:
         tk = self._tk
@@ -577,6 +591,7 @@ class AtoDesktop:
         return show_permission_dialog(self.root, self.theme, prompt)
 
     def _close(self) -> None:
+        self._closed = True
         if self._settings_dialog is not None:
             self._settings_dialog.close()
         if self._workspace_palette is not None:
@@ -584,6 +599,32 @@ class AtoDesktop:
         if self.permission_bridge is not None:
             self.permission_bridge.detach()
         self.root.destroy()
+
+    def _refresh_system_async(self) -> None:
+        if self._closed or self._system_refreshing:
+            return
+        self._system_refreshing = True
+        threading.Thread(target=self._run_system_refresh, daemon=True).start()
+
+    def _run_system_refresh(self) -> None:
+        try:
+            lines = self.controller.system_snapshot()
+        except Exception:
+            lines = None
+        if self._closed:
+            return
+        try:
+            self.root.after(0, self._finish_system_refresh, lines)
+        except (RuntimeError, self._tk.TclError):
+            pass
+
+    def _finish_system_refresh(self, lines: tuple[str, ...] | None) -> None:
+        self._system_refreshing = False
+        if self._closed:
+            return
+        if lines is not None:
+            self.system_value.configure(text="\n".join(lines))
+        self.root.after(SYSTEM_REFRESH_MS, self._refresh_system_async)
 
     def _voice_locked(self) -> None:
         from tkinter import messagebox
