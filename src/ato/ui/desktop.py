@@ -9,18 +9,22 @@ from pathlib import Path
 from ato.brain.agent import Agent
 from ato.brain.context import ContextManager
 from ato.brain.memory import CompositeMemoryRetriever
+from ato.brain.messages import Role
 from ato.brain.prompts import SYSTEM_PROMPT
 from ato.config import Settings
 from ato.exceptions import AtoError
 from ato.knowledge import SqliteKnowledgeStore
 from ato.memory import JsonMemoryStore, SqliteLongTermMemory
 from ato.providers import DeepSeekProvider
+from ato.security import AuditLogger, PermissionManager
 from ato.tools.system import collect_system_info
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
+from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
+from ato.voice import WindowsSpeechPlayer
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
 
@@ -41,6 +45,7 @@ class DesktopChatController:
     long_term_memory: SqliteLongTermMemory | None = None
     knowledge_store: SqliteKnowledgeStore | None = None
     workspace_root: Path | None = None
+    speech_service: DesktopSpeechService | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -50,6 +55,16 @@ class DesktopChatController:
         if self.memory_store is not None:
             self.memory_store.save_context(self.agent.conversation, self.agent.summary)
         return reply
+
+    def latest_assistant_reply(self) -> str | None:
+        return next(
+            (
+                message.content
+                for message in reversed(self.agent.conversation)
+                if message.role is Role.ASSISTANT
+            ),
+            None,
+        )
 
     def memory_snapshot(self) -> tuple[str, ...]:
         if self.long_term_memory is None:
@@ -176,7 +191,11 @@ class AtoDesktop:
 
         self.status = tk.Label(
             self.sidebar,
-            text="● AGENT READY\n● MEMORY READY\n○ GUI TOOLS LOCKED",
+            text=(
+                "● AGENT READY\n● MEMORY READY\n● SPEECH READY\n○ OTHER TOOLS LOCKED"
+                if self.controller.speech_service is not None
+                else "● AGENT READY\n● MEMORY READY\n○ GUI TOOLS LOCKED"
+            ),
             justify="left",
             anchor="sw",
         )
@@ -233,7 +252,16 @@ class AtoDesktop:
         self.theme_button.pack(side="right", padx=(0, 12), pady=12)
         self.connection_label = tk.Label(self.header, text="LOCAL CORE ONLINE", padx=10, pady=5)
         self.connection_label.pack(side="right", pady=15)
-        self.lock_badge = tk.Label(self.header, text="CHAT-ONLY • TOOLS LOCKED", padx=10, pady=5)
+        self.lock_badge = tk.Label(
+            self.header,
+            text=(
+                "CHAT + APPROVED SPEECH"
+                if self.controller.speech_service is not None
+                else "CHAT-ONLY • TOOLS LOCKED"
+            ),
+            padx=10,
+            pady=5,
+        )
         self.lock_badge.pack(side="right", pady=15)
 
         self.orb = AtoOrbCanvas(self.main_panel, self.state_model, self.theme, height=340)
@@ -270,6 +298,15 @@ class AtoDesktop:
             relief="flat",
         )
         self.microphone_button.pack(side="right", fill="y", padx=(10, 0))
+        self.speak_button = tk.Button(
+            self.composer,
+            text="SPEAK LAST" if self.controller.speech_service is not None else "SPEECH OFF",
+            command=self._speak_latest,
+            width=11,
+            relief="flat",
+            state="normal" if self.controller.speech_service is not None else "disabled",
+        )
+        self.speak_button.pack(side="right", fill="y", padx=(10, 0))
         self.current_status = tk.Label(
             self.composer,
             text="READY",
@@ -381,6 +418,13 @@ class AtoDesktop:
             activeforeground=theme.warning,
             font=(theme.font_family, 9),
         )
+        self.speak_button.configure(
+            bg=theme.panel_alt,
+            fg=theme.accent_secondary if self.controller.speech_service else theme.muted_text,
+            activebackground=theme.border,
+            activeforeground=theme.accent,
+            font=(theme.font_family, 9),
+        )
         self.current_status.configure(
             bg=theme.panel_alt,
             fg=theme.accent,
@@ -422,8 +466,13 @@ class AtoDesktop:
             "Ato interface settings",
             "Theme: "
             f"{self.theme.display_name}\n\nF11: toggle full screen\nEsc: leave full screen\n"
-            "Ctrl+Enter: send message\n\nVoice and GUI tools remain locked until their "
-            "permission bridge is enabled.",
+            "Ctrl+Enter: send message\n\n"
+            + (
+                "SPEAK LAST is enabled with confirmation. Microphone and other GUI tools remain "
+                "locked."
+                if self.controller.speech_service is not None
+                else "Voice and GUI tools remain locked until explicitly enabled."
+            ),
             parent=self.root,
         )
 
@@ -455,6 +504,57 @@ class AtoDesktop:
             "controls will activate only after GUI permission prompts are connected.",
             parent=self.root,
         )
+
+    def _speak_latest(self) -> None:
+        if self._busy or self.controller.speech_service is None:
+            return
+        reply = self.controller.latest_assistant_reply()
+        if reply is None:
+            from tkinter import messagebox
+
+            messagebox.showinfo(
+                "Nothing to speak",
+                "Ask Ato something first, then select SPEAK LAST.",
+                parent=self.root,
+            )
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Awaiting speech permission",
+            tool="OFFLINE WINDOWS SPEECH",
+        )
+        self.speak_button.configure(state="disabled")
+        self.send_button.configure(state="disabled")
+        threading.Thread(target=self._run_speech, args=(reply,), daemon=True).start()
+
+    def _run_speech(self, reply: str) -> None:
+        assert self.controller.speech_service is not None
+        try:
+            self.controller.speech_service.speak(
+                reply,
+                on_playback=lambda: self.state_model.transition(
+                    AtoVisualState.SPEAKING,
+                    active_task="Playing latest reply",
+                    tool="OFFLINE WINDOWS SPEECH",
+                ),
+            )
+        except AtoError as exc:
+            self.root.after(0, self._finish_speech, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_speech, "Speech playback failed safely.")
+        else:
+            self.root.after(0, self._finish_speech, None)
+
+    def _finish_speech(self, error: str | None) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        self.send_button.configure(state="normal")
+        self.speak_button.configure(state="normal")
+        if error:
+            from tkinter import messagebox
+
+            messagebox.showerror("Ato speech", error, parent=self.root)
 
     def _refresh_hud(self) -> None:
         snapshot = self.state_model.snapshot()
@@ -596,6 +696,16 @@ def main() -> None:
             memory_retriever=CompositeMemoryRetriever(long_term_memory, knowledge_store),
             tools=None,
         )
+        permission_bridge = GuiPermissionBridge()
+        speech_service = (
+            DesktopSpeechService(
+                WindowsSpeechPlayer(),
+                PermissionManager(permission_bridge.confirm),
+                AuditLogger(settings.audit_file),
+            )
+            if settings.voice_enabled
+            else None
+        )
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -603,8 +713,9 @@ def main() -> None:
                 long_term_memory,
                 knowledge_store,
                 settings.workspace_root,
+                speech_service,
             ),
-            permission_bridge=GuiPermissionBridge(),
+            permission_bridge=permission_bridge,
         ).run()
     except (AtoError, ValueError) as exc:
         raise SystemExit(f"Unable to start Ato desktop: {exc}") from exc

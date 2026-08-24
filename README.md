@@ -75,6 +75,7 @@ The current build provides:
 - A native chat-only desktop shell with persisted conversation and background model requests
 - An original full-screen Ato HUD centered on an animated, backend-driven AI visual core
 - A fail-closed, thread-safe GUI permission bridge with secret-redacted confirmation previews
+- Optional audited desktop `SPEAK LAST` playback with real `TOOL_EXECUTION` and `SPEAKING` states
 - A DeepSeek provider using its OpenAI-compatible chat API
 - Streaming tool-call reconstruction with the same execution and permission limits
 - Provider-neutral structured JSON contracts with independent schema validation
@@ -322,9 +323,11 @@ The thread-safe visual model defines these real backend states:
 Today the desktop automatically transitions `IDLE -> PROCESSING -> IDLE` around real chat work.
 Its permission bridge safely marshals future background tool requests onto Tk's UI thread, serializes
 prompts, redacts sensitive arguments, and denies requests on timeout, shutdown, or dialog failure.
-The bridge is attached, but desktop tools remain deliberately locked during this safety increment.
-Listening, tool execution, and speaking visuals exist in the shared state model but remain unable to
-activate from GUI controls until the permission bridge connects their actual backends. The right HUD
+When `ATO_VOICE_ENABLED=true`, **SPEAK LAST** reads only the newest assistant reply using offline
+Windows speech after HIGH confirmation. The HUD enters `TOOL_EXECUTION` while awaiting approval,
+then `SPEAKING` only after approval and returns to `IDLE` when playback ends. The action is audited,
+the reply is represented by a hash and character count in the audit log, and playback is never
+automatic. Microphone capture and all other desktop tools remain locked. The right HUD
 shows the active task, locked tool channel, and privacy-reduced local OS/CPU/RAM data; network status
 is explicitly `NOT PROBED`. The bottom microphone control also remains visibly locked. Press `F11`
 to toggle full screen and `Esc` to leave it. Switching to Standard hides the cinematic orb and right
