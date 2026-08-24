@@ -82,6 +82,7 @@ The current build provides:
 - Desktop Python syntax checks plus confirmed fixed Ruff and pytest verification
 - Bounded desktop workspace file listing and read-only UTF-8 text viewing
 - Read-only exact text-change previews with bounded diffs and SHA-256 fingerprints
+- HIGH-confirmed atomic application of complete, unchanged previews with rollback checkpoints
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
@@ -302,8 +303,8 @@ The window provides persisted text chat, recent-history restoration, subsystem n
 indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
 Model requests run off the Tk event loop so the window remains responsive. A thread-safe permission
 bridge protects the narrowly enabled voice, workspace-search, and research controls. The language
-model itself receives no autonomous desktop tools, and file mutation, commands, Git actions, and
-other capabilities remain confined to the permission-controlled terminal interface.
+model itself receives no autonomous desktop tools. Only exact, fully reviewed text replacements can
+mutate files; commands, Git mutation, and other capabilities remain confined to the terminal.
 Desktop responses use a small inert formatter for headings, bold text, inline code, and bullets.
 Markup characters are removed for readability, unsupported control characters are replaced, and
 URLs remain non-clickable plain text; the formatter never loads HTML, images, or external content.
@@ -317,8 +318,9 @@ text or flags and caps displayed output at 20,000 characters. It can also parse 
 without execution, run fixed non-fixing Ruff after MEDIUM confirmation, and run fixed pytest after
 HIGH confirmation. Verification output is bounded and failed checks are reported explicitly.
 The PREVIEW action validates one exact unique text match and displays a bounded unified diff plus
-original and proposed SHA-256 fingerprints. It never writes, and applying the preview remains
-disabled in this increment.
+original and proposed SHA-256 fingerprints. A complete preview can proceed to a separate HIGH
+confirmation; Ato reuses the exact reviewed values, rejects stale files, writes atomically, and
+creates a rollback checkpoint. Truncated previews can never be applied.
 Research provides a
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
 external evidence. A selected result can be fetched only after a second MEDIUM confirmation;
@@ -327,8 +329,8 @@ blocked, and displayed page text is capped at 20,000 characters. After fetching,
 manually ask one question about that source. Ato receives the page in an escaped untrusted-evidence
 envelope, must cite the exact source URL, and persists only the question and answer—not the full page
 text—in conversation memory. Activity shows only bounded audit metadata—never raw arguments,
-content, transcripts, or error details. Mutating memory, knowledge, files, Git state, and other
-tools remain confined to the permission-controlled terminal interface for now.
+content, transcripts, or error details. Mutating memory, knowledge, Git state, and other tools
+remain confined to the permission-controlled terminal interface for now.
 
 ### Cinematic Ato HUD
 

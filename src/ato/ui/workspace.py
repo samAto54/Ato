@@ -1,4 +1,4 @@
-"""Narrow read-only workspace search adapter for the desktop UI."""
+"""Narrow guarded workspace operations for the desktop UI."""
 
 from __future__ import annotations
 
@@ -34,11 +34,21 @@ class WorkspaceChangePreview:
     original_sha256: str
     updated_sha256: str
     truncated: bool
+    old_text: str
+    new_text: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkspaceChangeResult:
+    path: str
+    bytes_written: int
+    updated_sha256: str
+    checkpoint_id: int | None
 
 
 @dataclass(slots=True)
 class DesktopWorkspaceSearch:
-    """Expose only literal read-only search from a private tool registry."""
+    """Expose fixed inspections and exact preview-bound edits from a private registry."""
 
     registry: ToolRegistry
 
@@ -126,7 +136,42 @@ class DesktopWorkspaceSearch:
             original_sha256.casefold(),
             updated_sha256.casefold(),
             display_truncated,
+            old_text,
+            new_text,
         )
+
+    def apply_text_change(self, preview: WorkspaceChangePreview) -> WorkspaceChangeResult:
+        if preview.truncated:
+            raise ToolError("A truncated diff cannot be applied from the desktop.")
+        raw = self.registry.execute(
+            "replace_text_in_file",
+            {
+                "path": preview.path,
+                "old_text": preview.old_text,
+                "new_text": preview.new_text,
+                "expected_sha256": preview.original_sha256,
+            },
+            user_request="Apply the exact reviewed desktop text-change preview",
+        )
+        try:
+            payload = json.loads(raw)
+            path = str(payload["path"])
+            bytes_written = int(payload["bytes"])
+            original_sha256 = str(payload["original_sha256"]).casefold()
+            updated_sha256 = str(payload["updated_sha256"]).casefold()
+            raw_checkpoint = payload["checkpoint_id"]
+            checkpoint_id = None if raw_checkpoint is None else int(raw_checkpoint)
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ToolError("Text change returned an invalid result.") from exc
+        if (
+            path != preview.path
+            or original_sha256 != preview.original_sha256
+            or updated_sha256 != preview.updated_sha256
+            or bytes_written < 0
+            or (checkpoint_id is not None and checkpoint_id < 1)
+        ):
+            raise ToolError("Text change returned an invalid result.")
+        return WorkspaceChangeResult(path, bytes_written, updated_sha256, checkpoint_id)
 
     def search(self, query: str) -> WorkspaceSearchResult:
         cleaned = " ".join(query.split())
