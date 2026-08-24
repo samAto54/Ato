@@ -83,6 +83,7 @@ The current build provides:
 - Bounded desktop workspace file listing and read-only UTF-8 text viewing
 - Read-only exact text-change previews with bounded diffs and SHA-256 fingerprints
 - HIGH-confirmed atomic application of complete, unchanged previews with rollback checkpoints
+- Reviewed checkpoint listing and HIGH-confirmed one-time stale-safe desktop rollback
 - Privacy-reduced desktop Activity history for the 100 most recent audit events
 - Confirmed, bounded Tavily/Brave search in the desktop Research section
 - Separately confirmed exact-source HTTPS/PDF fetching with untrusted-content labelling
@@ -321,6 +322,9 @@ The PREVIEW action validates one exact unique text match and displays a bounded 
 original and proposed SHA-256 fingerprints. A complete preview can proceed to a separate HIGH
 confirmation; Ato reuses the exact reviewed values, rejects stale files, writes atomically, and
 creates a rollback checkpoint. Truncated previews can never be applied.
+The CHECKPOINTS action displays the 20 most recent checkpoint metadata records without original
+file content. ROLLBACK accepts only an ID from that reviewed list, shows its path and restore hash,
+requires HIGH confirmation, and refuses restored checkpoints or files containing newer work.
 Research provides a
 confirmed five-result Tavily/Brave search when configured and labels every result as untrusted
 external evidence. A selected result can be fetched only after a second MEDIUM confirmation;

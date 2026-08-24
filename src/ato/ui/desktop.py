@@ -41,7 +41,9 @@ from ato.ui.workspace import (
     DesktopWorkspaceSearch,
     WorkspaceChangePreview,
     WorkspaceChangeResult,
+    WorkspaceCheckpoint,
     WorkspaceInspectionResult,
+    WorkspaceRollbackResult,
     WorkspaceSearchResult,
 )
 from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
@@ -749,7 +751,7 @@ class AtoDesktop:
             elif section == "WORKSPACE":
                 lines = (
                     "Choose LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, "
-                    "LINT, TESTS, or PREVIEW. All actions are bounded; PREVIEW never writes.",
+                    "LINT, TESTS, PREVIEW, CHECKPOINTS, or ROLLBACK. All actions are bounded.",
                 )
             elif section == "RESEARCH":
                 lines = (
@@ -781,12 +783,18 @@ class AtoDesktop:
         action = simpledialog.askstring(
             "Inspect workspace",
             "Action: LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or "
-            "TESTS, or PREVIEW",
+            "TESTS, PREVIEW, CHECKPOINTS, or ROLLBACK",
             parent=self.root,
         )
         if action is None or not action.strip():
             return
         normalized = action.strip().casefold()
+        if normalized == "checkpoints":
+            self._start_checkpoint_listing()
+            return
+        if normalized == "rollback":
+            self._start_checkpoint_rollback_dialog()
+            return
         if normalized == "preview":
             self._start_change_preview_dialog()
             return
@@ -836,6 +844,114 @@ class AtoDesktop:
             tool="READ-ONLY FILE SEARCH",
         )
         threading.Thread(target=self._run_workspace_search, args=(query,), daemon=True).start()
+
+    def _start_checkpoint_listing(self) -> None:
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Listing recoverable edit checkpoints",
+            tool="READ-ONLY CHECKPOINT LIST",
+        )
+        threading.Thread(target=self._run_checkpoint_listing, daemon=True).start()
+
+    def _run_checkpoint_listing(self) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            checkpoints = self.controller.workspace_search.list_checkpoints()
+        except AtoError as exc:
+            self.root.after(0, self._finish_checkpoint_listing, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_checkpoint_listing, None, "Listing failed safely.")
+        else:
+            self.root.after(0, self._finish_checkpoint_listing, checkpoints, None)
+
+    def _finish_checkpoint_listing(
+        self,
+        checkpoints: tuple[WorkspaceCheckpoint, ...] | None,
+        error: str | None,
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        self._clear_transcript()
+        if error:
+            self._show_read_only_lines((f"CHECKPOINT ERROR\n{error}",))
+            return
+        assert checkpoints is not None
+        lines = tuple(item.display() for item in checkpoints) or ("No edit checkpoints found.",)
+        self._show_read_only_lines(("RECENT EDIT CHECKPOINTS", *lines))
+
+    def _start_checkpoint_rollback_dialog(self) -> None:
+        assert self.controller.workspace_search is not None
+        from tkinter import messagebox, simpledialog
+
+        checkpoint_id = simpledialog.askinteger(
+            "Rollback text edit",
+            "Reviewed checkpoint ID (run CHECKPOINTS first):",
+            parent=self.root,
+            minvalue=1,
+        )
+        if checkpoint_id is None:
+            return
+        checkpoint = self.controller.workspace_search.reviewed_checkpoints.get(checkpoint_id)
+        if checkpoint is None:
+            messagebox.showerror(
+                "Rollback text edit",
+                "That checkpoint was not present in the most recent CHECKPOINTS view.",
+                parent=self.root,
+            )
+            return
+        proceed = messagebox.askyesno(
+            "Rollback reviewed checkpoint?",
+            f"Checkpoint: #{checkpoint.id}\nPath: {checkpoint.path}\n"
+            f"Restore SHA-256: {checkpoint.original_sha256}\n\n"
+            "Rollback will be refused if newer work exists.",
+            icon="warning",
+            parent=self.root,
+        )
+        if not proceed:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Awaiting HIGH permission for checkpoint #{checkpoint.id}",
+            tool="CHECKPOINT ROLLBACK",
+        )
+        threading.Thread(
+            target=self._run_checkpoint_rollback,
+            args=(checkpoint.id,),
+            daemon=True,
+        ).start()
+
+    def _run_checkpoint_rollback(self, checkpoint_id: int) -> None:
+        assert self.controller.workspace_search is not None
+        try:
+            result = self.controller.workspace_search.rollback_checkpoint(checkpoint_id)
+        except AtoError as exc:
+            self.root.after(0, self._finish_checkpoint_rollback, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_checkpoint_rollback, None, "Rollback failed safely.")
+        else:
+            self.root.after(0, self._finish_checkpoint_rollback, result, None)
+
+    def _finish_checkpoint_rollback(
+        self, result: WorkspaceRollbackResult | None, error: str | None
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "WORKSPACE":
+            return
+        if error:
+            self._show_read_only_lines((f"ROLLBACK ERROR\n{error}",))
+            return
+        assert result is not None
+        self._show_read_only_lines(
+            (
+                f"CHECKPOINT #{result.checkpoint_id} RESTORED\n{result.path}\n"
+                f"Restored SHA-256: {result.restored_sha256}",
+            )
+        )
 
     def _start_change_preview_dialog(self) -> None:
         from tkinter import simpledialog
