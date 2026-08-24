@@ -12,6 +12,7 @@ The current build provides:
 - A themed Workspace command matrix with grouped fixed actions and visible risk levels
 - A themed fail-closed security panel for desktop permission decisions
 - A themed interface-control panel for display settings and capability status
+- Bounded live RAM and workspace-disk telemetry with no network probing
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
 - A secret-free `/status` view of local memory, knowledge, tool, and voice availability
 - Local rejection of unknown slash commands with a `/help` hint and no model API request
@@ -309,6 +310,9 @@ The window provides persisted text chat, recent-history restoration, subsystem n
 indicators, and live Standard/Ato HUD switching. Press `Ctrl+Enter` or select **Send** to submit.
 The Settings control opens a themed panel with live voice capability status, theme switching, and
 fullscreen controls; it does not modify configuration files or enable locked capabilities.
+The HUD refreshes local OS, logical CPU count, RAM use, and workspace-disk use every five seconds on
+a worker thread. Network status remains explicitly `NOT PROBED`; telemetry performs no connectivity
+check and keeps the Tk event loop responsive.
 Model requests run off the Tk event loop so the window remains responsive. A thread-safe permission
 bridge protects the narrowly enabled voice, workspace-search, and research controls. The language
 model itself receives no autonomous desktop tools. Only exact, fully reviewed text replacements can
