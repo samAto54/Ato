@@ -10,6 +10,7 @@ from ato.ui.memory_palette import MemoryActionPalette
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import PermissionDialog
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
+from ato.ui.research_palette import ResearchActionPalette
 from ato.ui.settings_dialog import DesktopCapabilities, SettingsDialog
 from ato.ui.state import AtoVisualState
 from ato.ui.themes import ThemeId
@@ -65,6 +66,13 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     desktop.root.update_idletasks()
     assert memory_palette.window.winfo_exists() == 1
     memory_palette.close()
+
+    research_palette = ResearchActionPalette(
+        desktop.root, desktop.theme, selected.append, can_fetch=False
+    )
+    desktop.root.update_idletasks()
+    assert research_palette.window.winfo_exists() == 1
+    research_palette.close()
 
     permission = PermissionDialog(
         desktop.root,

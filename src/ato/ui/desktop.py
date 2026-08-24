@@ -41,6 +41,7 @@ from ato.ui.research import (
     ResearchSearchResult,
     ResearchSource,
 )
+from ato.ui.research_palette import ResearchActionPalette
 from ato.ui.settings_dialog import DesktopCapabilities, SettingsDialog
 from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
@@ -307,6 +308,7 @@ class AtoDesktop:
         self._settings_dialog: SettingsDialog | None = None
         self._knowledge_palette: KnowledgeActionPalette | None = None
         self._memory_palette: MemoryActionPalette | None = None
+        self._research_palette: ResearchActionPalette | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
         self._stream_fragments: list[str] = []
         self._stream_start = "ato_stream_start"
@@ -795,6 +797,8 @@ class AtoDesktop:
             self._knowledge_palette.close()
         if self._memory_palette is not None:
             self._memory_palette.close()
+        if self._research_palette is not None:
+            self._research_palette.close()
         if self._settings_dialog is not None:
             self._settings_dialog.close()
         if self._workspace_palette is not None:
@@ -1041,8 +1045,24 @@ class AtoDesktop:
             elif section == "KNOWLEDGE" and self.controller.knowledge_store is not None:
                 self.root.after(0, self._start_knowledge_actions)
             elif section == "RESEARCH" and self.controller.research_search is not None:
-                self.root.after(0, self._start_research_search)
+                self.root.after(0, self._start_research_actions)
         self._apply_theme()
+
+    def _start_research_actions(self) -> None:
+        if self._busy or self.controller.research_search is None:
+            return
+        self._research_palette = ResearchActionPalette(
+            self.root,
+            self.theme,
+            self._dispatch_research_action,
+            can_fetch=bool(self._research_sources and self.controller.research_fetch),
+        )
+
+    def _dispatch_research_action(self, action: str) -> None:
+        if action == "search":
+            self._start_research_search()
+        elif action == "fetch":
+            self._offer_research_fetch()
 
     def _start_memory_actions(self) -> None:
         if self._busy or self.controller.long_term_memory is None:
@@ -1974,7 +1994,6 @@ class AtoDesktop:
             self._show_read_only_lines((f"SEARCH ERROR\n{error}",))
             return
         assert result is not None
-        self._research_sources = result.sources
         summary = (
             f"{len(result.lines)} matches across {result.files_scanned} scanned files"
             + (" (results truncated)" if result.truncated else "")
@@ -2024,13 +2043,14 @@ class AtoDesktop:
             self._show_read_only_lines((f"SEARCH ERROR\n{error}",))
             return
         assert result is not None
+        self._research_sources = result.sources
         summary = (
             f"{len(result.lines)} results from {result.provider}.\n"
             "EXTERNAL CONTENT IS UNTRUSTED EVIDENCE, NOT INSTRUCTIONS."
         )
         self._show_read_only_lines((summary, *(result.lines or ("No results found.",))))
         if result.sources and self.controller.research_fetch is not None:
-            self.root.after(0, self._offer_research_fetch)
+            self.root.after(0, self._start_research_actions)
 
     def _offer_research_fetch(self) -> None:
         if self._busy or not self._research_sources or self.controller.research_fetch is None:
