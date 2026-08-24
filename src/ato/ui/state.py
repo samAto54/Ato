@@ -30,7 +30,11 @@ ALLOWED_TRANSITIONS = {
         AtoVisualState.PROCESSING,
         AtoVisualState.TOOL_EXECUTION,
     },
-    AtoVisualState.LISTENING: {AtoVisualState.IDLE, AtoVisualState.PROCESSING},
+    AtoVisualState.LISTENING: {
+        AtoVisualState.IDLE,
+        AtoVisualState.PROCESSING,
+        AtoVisualState.TOOL_EXECUTION,
+    },
     AtoVisualState.PROCESSING: {
         AtoVisualState.IDLE,
         AtoVisualState.TOOL_EXECUTION,
@@ -38,6 +42,7 @@ ALLOWED_TRANSITIONS = {
     },
     AtoVisualState.TOOL_EXECUTION: {
         AtoVisualState.IDLE,
+        AtoVisualState.LISTENING,
         AtoVisualState.PROCESSING,
         AtoVisualState.SPEAKING,
     },

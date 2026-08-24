@@ -24,7 +24,8 @@ from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
 from ato.ui.speech import DesktopSpeechService
 from ato.ui.state import AtoStateModel, AtoVisualState
 from ato.ui.themes import ThemeId, alternate_theme, get_theme
-from ato.voice import WindowsSpeechPlayer
+from ato.ui.voice_turn import DesktopVoiceTurnService
+from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpeechPlayer
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
 
@@ -46,6 +47,7 @@ class DesktopChatController:
     knowledge_store: SqliteKnowledgeStore | None = None
     workspace_root: Path | None = None
     speech_service: DesktopSpeechService | None = None
+    voice_turn_service: DesktopVoiceTurnService | None = None
 
     def submit(self, text: str) -> str:
         cleaned = text.strip()
@@ -192,7 +194,9 @@ class AtoDesktop:
         self.status = tk.Label(
             self.sidebar,
             text=(
-                "● AGENT READY\n● MEMORY READY\n● SPEECH READY\n○ OTHER TOOLS LOCKED"
+                "● AGENT READY\n● MEMORY READY\n● VOICE READY\n○ OTHER TOOLS LOCKED"
+                if self.controller.voice_turn_service is not None
+                else "● AGENT READY\n● MEMORY READY\n● SPEECH READY\n○ OTHER TOOLS LOCKED"
                 if self.controller.speech_service is not None
                 else "● AGENT READY\n● MEMORY READY\n○ GUI TOOLS LOCKED"
             ),
@@ -255,7 +259,9 @@ class AtoDesktop:
         self.lock_badge = tk.Label(
             self.header,
             text=(
-                "CHAT + APPROVED SPEECH"
+                "CHAT + APPROVED VOICE"
+                if self.controller.voice_turn_service is not None
+                else "CHAT + APPROVED SPEECH"
                 if self.controller.speech_service is not None
                 else "CHAT-ONLY • TOOLS LOCKED"
             ),
@@ -292,8 +298,12 @@ class AtoDesktop:
         self.send_button.pack(side="right", fill="y", padx=(10, 0))
         self.microphone_button = tk.Button(
             self.composer,
-            text="MIC LOCKED",
-            command=self._voice_locked,
+            text="VOICE TURN" if self.controller.voice_turn_service is not None else "MIC LOCKED",
+            command=(
+                self._start_voice_turn
+                if self.controller.voice_turn_service is not None
+                else self._voice_locked
+            ),
             width=11,
             relief="flat",
         )
@@ -413,7 +423,11 @@ class AtoDesktop:
         )
         self.microphone_button.configure(
             bg=theme.panel_alt,
-            fg=theme.muted_text,
+            fg=(
+                theme.accent_secondary
+                if self.controller.voice_turn_service is not None
+                else theme.muted_text
+            ),
             activebackground=theme.border,
             activeforeground=theme.warning,
             font=(theme.font_family, 9),
@@ -468,8 +482,11 @@ class AtoDesktop:
             f"{self.theme.display_name}\n\nF11: toggle full screen\nEsc: leave full screen\n"
             "Ctrl+Enter: send message\n\n"
             + (
-                "SPEAK LAST is enabled with confirmation. Microphone and other GUI tools remain "
-                "locked."
+                "SPEAK LAST and reviewed one-shot voice turns are enabled with confirmation. "
+                "Background listening and other GUI tools remain locked."
+                if self.controller.voice_turn_service is not None
+                else "SPEAK LAST is enabled with confirmation. Microphone and other GUI tools "
+                "remain locked."
                 if self.controller.speech_service is not None
                 else "Voice and GUI tools remain locked until explicitly enabled."
             ),
@@ -502,6 +519,86 @@ class AtoDesktop:
             "Voice is locked",
             "The visual LISTENING and SPEAKING states are ready, but microphone and speech "
             "controls will activate only after GUI permission prompts are connected.",
+            parent=self.root,
+        )
+
+    def _start_voice_turn(self) -> None:
+        if self._busy or self.controller.voice_turn_service is None:
+            return
+        from tkinter import simpledialog
+
+        duration = simpledialog.askinteger(
+            "Ato voice turn",
+            "Recording duration in seconds (1-120):",
+            parent=self.root,
+            minvalue=1,
+            maxvalue=120,
+            initialvalue=5,
+        )
+        if duration is None:
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task="Awaiting microphone permission",
+            tool="MICROPHONE RECORDING",
+        )
+        self.microphone_button.configure(state="disabled")
+        self.speak_button.configure(state="disabled")
+        self.send_button.configure(state="disabled")
+        threading.Thread(target=self._run_voice_turn, args=(duration,), daemon=True).start()
+
+    def _run_voice_turn(self, duration: int) -> None:
+        assert self.controller.voice_turn_service is not None
+        try:
+            transcript = self.controller.voice_turn_service.capture(
+                duration,
+                on_recording=lambda: self.state_model.transition(
+                    AtoVisualState.LISTENING,
+                    active_task=f"Recording {duration}-second voice turn",
+                    tool="MICROPHONE RECORDING",
+                ),
+                on_transcription_request=lambda: self.state_model.transition(
+                    AtoVisualState.TOOL_EXECUTION,
+                    active_task="Awaiting transcription permission",
+                    tool="LOCAL TRANSCRIPTION",
+                ),
+                on_transcribing=lambda: self.state_model.transition(
+                    AtoVisualState.PROCESSING,
+                    active_task="Transcribing recording locally",
+                    tool="LOCAL TRANSCRIPTION",
+                ),
+            )
+        except AtoError as exc:
+            self.root.after(0, self._finish_voice_turn, None, str(exc))
+        except Exception:
+            self.root.after(0, self._finish_voice_turn, None, "Voice turn failed safely.")
+        else:
+            self.root.after(0, self._finish_voice_turn, transcript, None)
+
+    def _finish_voice_turn(self, transcript: str | None, error: str | None) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        self.send_button.configure(state="normal")
+        self.speak_button.configure(
+            state="normal" if self.controller.speech_service is not None else "disabled"
+        )
+        self.microphone_button.configure(state="normal")
+        if error:
+            from tkinter import messagebox
+
+            messagebox.showerror("Ato voice turn", error, parent=self.root)
+            return
+        assert transcript is not None
+        self.input.delete("1.0", "end")
+        self.input.insert("1.0", transcript)
+        self.input.focus_set()
+        from tkinter import messagebox
+
+        messagebox.showinfo(
+            "Review voice transcript",
+            "The local transcript is now in the message box. Review or edit it, then select SEND. "
+            "Ato has not submitted it automatically.",
             parent=self.root,
         )
 
@@ -706,6 +803,17 @@ def main() -> None:
             if settings.voice_enabled
             else None
         )
+        voice_turn_service = (
+            DesktopVoiceTurnService(
+                SoundDeviceRecorder(settings.workspace_root / "data" / "audio"),
+                FasterWhisperTranscriber(settings.stt_model_path),
+                PermissionManager(permission_bridge.confirm),
+                AuditLogger(settings.audit_file),
+                settings.workspace_root,
+            )
+            if settings.voice_enabled and settings.stt_model_path is not None
+            else None
+        )
         AtoDesktop(
             DesktopChatController(
                 agent,
@@ -714,6 +822,7 @@ def main() -> None:
                 knowledge_store,
                 settings.workspace_root,
                 speech_service,
+                voice_turn_service,
             ),
             permission_bridge=permission_bridge,
         ).run()
