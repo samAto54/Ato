@@ -41,12 +41,11 @@ from ato.voice import FasterWhisperTranscriber, SoundDeviceRecorder, WindowsSpee
 
 DESKTOP_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
 
-Desktop runtime constraint: this interface is currently chat-only and provides no tools. You
-cannot browse or fetch web pages, inspect or change files, run commands, use Git, access the
-clipboard, record audio, or perform any other tool action in this runtime. Never claim that you
-performed an unavailable action. Clearly state the limitation when a request requires a tool and
-offer a text-only alternative. Treat recollections of tool results from earlier turns as historical
-conversation, not evidence that tools are available now."""
+Desktop runtime constraint: the language model has no autonomous tools. User-triggered desktop
+controls may separately perform approved voice, read-only workspace, and research actions, but you
+must never claim that you initiated them. You cannot change files, run commands, use Git, access the
+clipboard, or perform other tool actions in this runtime. Treat recollections of tool results from
+earlier turns as historical conversation, not evidence that an action is available now."""
 
 
 @dataclass(slots=True)
@@ -83,6 +82,20 @@ class DesktopChatController:
             ),
             None,
         )
+
+    def submit_research_question(self, question: str, page: ResearchPage) -> str:
+        cleaned = question.strip()
+        if not cleaned:
+            raise ValueError("Research question cannot be empty.")
+        reply = self.agent.respond_with_external_evidence(
+            cleaned,
+            source_url=page.source_url,
+            title=page.title,
+            evidence=page.text,
+        )
+        if self.memory_store is not None:
+            self.memory_store.save_context(self.agent.conversation, self.agent.summary)
+        return reply
 
     def memory_snapshot(self) -> tuple[str, ...]:
         if self.long_term_memory is None:
@@ -902,6 +915,63 @@ class AtoDesktop:
             + ("\nDISPLAY TEXT TRUNCATED" if page.truncated else "")
         )
         self._show_read_only_lines((heading, page.text))
+        self.root.after(0, self._offer_research_question, page)
+
+    def _offer_research_question(self, page: ResearchPage) -> None:
+        if self._busy or self._section != "RESEARCH":
+            return
+        from tkinter import simpledialog
+
+        question = simpledialog.askstring(
+            "Ask Ato about this source",
+            "Question grounded in this fetched source (Cancel to stop):",
+            parent=self.root,
+        )
+        if question is None or not question.strip():
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.PROCESSING,
+            active_task="Answering from approved source evidence",
+        )
+        threading.Thread(
+            target=self._run_research_question,
+            args=(question, page),
+            daemon=True,
+        ).start()
+
+    def _run_research_question(self, question: str, page: ResearchPage) -> None:
+        try:
+            reply = self.controller.submit_research_question(question, page)
+        except AtoError as exc:
+            self.root.after(0, self._finish_research_question, question, None, str(exc))
+        except Exception:
+            self.root.after(
+                0,
+                self._finish_research_question,
+                question,
+                None,
+                "Ato could not answer from the fetched source.",
+            )
+        else:
+            self.root.after(0, self._finish_research_question, question, reply, None)
+
+    def _finish_research_question(
+        self,
+        question: str,
+        reply: str | None,
+        error: str | None,
+    ) -> None:
+        self._busy = False
+        self.state_model.transition(AtoVisualState.IDLE)
+        if self._section != "RESEARCH":
+            return
+        self._show_read_only_lines(
+            (
+                f"QUESTION\n{question}",
+                f"ATO\n{reply}" if reply is not None else f"ANSWER ERROR\n{error}",
+            )
+        )
 
     def _show_read_only_lines(self, lines: tuple[str, ...]) -> None:
         self.transcript.configure(state="normal")
