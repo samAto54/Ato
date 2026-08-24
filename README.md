@@ -26,6 +26,7 @@ The current build provides:
 - HIGH-confirmed, non-overwriting desktop conversation export to inert plain text
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
+- Themed Research controls for deliberate search and reviewed source fetching
 - Complete themed Memory lifecycle controls, including bounded expiration and permanent forgetting
 - Conversation context during the current process
 - Persistent recent conversation history across restarts
@@ -353,6 +354,9 @@ HIGH confirmation. Verification output is bounded and failed checks are reported
 Selecting Workspace opens a themed command matrix grouped into Files, Git Inspection, Verify, and
 Edit & Recovery. Every action displays its permission level, so no action name or arbitrary command
 must be typed.
+Research opens a fixed action panel instead of automatically chaining dialogs. Search and Fetch are
+separate MEDIUM-risk actions; Fetch stays disabled until a successful search provides reviewed HTTPS
+sources. Search results cannot accidentally become workspace-search source state.
 Opening Knowledge can import one explicitly selected workspace document after HIGH-risk consent.
 Parsing and indexing run off the UI thread; existing size, format, path, symlink, archive-expansion,
 and secret-detection rules remain authoritative. Files outside the configured workspace are refused.
