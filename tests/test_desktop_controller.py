@@ -15,6 +15,7 @@ from ato.ui.desktop import (
     DesktopStreamCancelled,
 )
 from ato.ui.research import ResearchPage
+from ato.ui.workspace import WorkspaceCreatedFile
 
 
 class EchoLLM:
@@ -55,6 +56,26 @@ def test_desktop_controller_rejects_empty_message() -> None:
     controller = DesktopChatController(Agent(EchoLLM()))
     with pytest.raises(ValueError, match="empty"):
         controller.submit("   ")
+
+
+def test_desktop_controller_exports_bounded_plain_text_conversation() -> None:
+    class ExportService:
+        def __init__(self) -> None:
+            self.received = None
+
+        def create_text_file(self, path, content):
+            self.received = (path, content)
+            return WorkspaceCreatedFile(path, len(content.encode("utf-8")))
+
+    service = ExportService()
+    controller = DesktopChatController(Agent(EchoLLM()), workspace_search=service)
+    controller.submit("hello")
+
+    result = controller.export_conversation("exports/chat.txt")
+
+    assert result.path == "exports/chat.txt"
+    assert service.received[0] == "exports/chat.txt"
+    assert service.received[1].startswith("Ato conversation export\n")
 
 
 def test_desktop_controller_clears_recent_chat_but_retains_long_term_memory(tmp_path) -> None:

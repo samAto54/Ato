@@ -33,6 +33,7 @@ from ato.ui.orb import AtoOrbCanvas
 from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permission_dialog import show_permission_dialog
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
+from ato.ui.presentation import render_history_export
 from ato.ui.research import (
     DesktopResearchFetch,
     DesktopResearchSearch,
@@ -50,6 +51,7 @@ from ato.ui.workspace import (
     WorkspaceChangePreview,
     WorkspaceChangeResult,
     WorkspaceCheckpoint,
+    WorkspaceCreatedFile,
     WorkspaceInspectionResult,
     WorkspaceRollbackResult,
     WorkspaceSearchResult,
@@ -124,6 +126,15 @@ class DesktopChatController:
         if self.memory_store is not None:
             self.memory_store.clear()
         self.agent.clear_conversation()
+
+    def export_conversation(self, relative_path: str) -> WorkspaceCreatedFile:
+        if self.workspace_search is None:
+            raise AtoError("Guarded workspace file creation is not configured.")
+        if not self.agent.conversation:
+            raise AtoError("There is no conversation history to export.")
+        return self.workspace_search.create_text_file(
+            relative_path, render_history_export(self.agent.conversation)
+        )
 
     def latest_assistant_reply(self) -> str | None:
         return next(
@@ -413,6 +424,13 @@ class AtoDesktop:
             relief="flat",
         )
         self.new_chat_button.pack(side="right", padx=(0, 12), pady=12)
+        self.export_chat_button = tk.Button(
+            self.header,
+            text="EXPORT",
+            command=self._start_conversation_export,
+            relief="flat",
+        )
+        self.export_chat_button.pack(side="right", padx=(0, 12), pady=12)
         self.theme_button = tk.Button(self.header, command=self._toggle_theme, relief="flat")
         self.theme_button.pack(side="right", padx=(0, 12), pady=12)
         self.connection_label = tk.Label(self.header, text="LOCAL CORE ONLINE", padx=10, pady=5)
@@ -538,6 +556,13 @@ class AtoDesktop:
         self.new_chat_button.configure(
             bg=theme.panel_alt,
             fg=theme.warning,
+            activebackground=theme.border,
+            activeforeground=theme.text,
+            font=(theme.font_family, 9),
+        )
+        self.export_chat_button.configure(
+            bg=theme.panel_alt,
+            fg=theme.accent_secondary,
             activebackground=theme.border,
             activeforeground=theme.text,
             font=(theme.font_family, 9),
@@ -685,6 +710,84 @@ class AtoDesktop:
         self._append("System", "New conversation started. Long-term memory was retained.")
         self.title.configure(text="Conversation")
         self.input.focus_set()
+
+    def _start_conversation_export(self) -> None:
+        if (
+            self._busy
+            or not self.controller.agent.conversation
+            or self.controller.workspace_search is None
+            or self.controller.workspace_root is None
+        ):
+            return
+        from tkinter import filedialog, messagebox
+
+        export_directory = self.controller.workspace_root / "exports"
+        selected = filedialog.asksaveasfilename(
+            title="Export Ato conversation",
+            initialdir=(
+                export_directory if export_directory.is_dir() else self.controller.workspace_root
+            ),
+            defaultextension=".txt",
+            filetypes=(("Plain text", "*.txt"),),
+            confirmoverwrite=False,
+            parent=self.root,
+        )
+        if not selected:
+            return
+        try:
+            path = Path(selected).resolve().relative_to(
+                self.controller.workspace_root.resolve()
+            )
+        except (OSError, ValueError):
+            messagebox.showerror(
+                "Conversation export",
+                "Choose a new .txt file inside the configured Ato workspace.",
+                parent=self.root,
+            )
+            return
+        relative = path.as_posix()
+        if path.suffix.casefold() != ".txt":
+            messagebox.showerror(
+                "Conversation export", "Conversation exports must use .txt.", parent=self.root
+            )
+            return
+        self._busy = True
+        self.state_model.transition(
+            AtoVisualState.TOOL_EXECUTION,
+            active_task=f"Awaiting export approval for {relative[:60]}",
+            tool="NON-OVERWRITING TEXT EXPORT",
+        )
+        threading.Thread(
+            target=self._run_conversation_export, args=(relative,), daemon=True
+        ).start()
+
+    def _run_conversation_export(self, relative_path: str) -> None:
+        try:
+            result = self.controller.export_conversation(relative_path)
+        except AtoError as exc:
+            self.root.after(0, self._finish_conversation_export, None, str(exc))
+        except Exception:
+            self.root.after(
+                0, self._finish_conversation_export, None, "Conversation export failed safely."
+            )
+        else:
+            self.root.after(0, self._finish_conversation_export, result, None)
+
+    def _finish_conversation_export(
+        self, result: WorkspaceCreatedFile | None, error: str | None
+    ) -> None:
+        from tkinter import messagebox
+
+        if error:
+            messagebox.showerror("Conversation export", error, parent=self.root)
+        else:
+            assert result is not None
+            messagebox.showinfo(
+                "Conversation exported",
+                f"Created {result.path}\n{result.bytes_written} UTF-8 bytes",
+                parent=self.root,
+            )
+        self._set_busy(False)
 
     def _close(self) -> None:
         self._closed = True
@@ -2149,6 +2252,7 @@ class AtoDesktop:
             state="normal" if self._stream_active or not busy else "disabled",
         )
         self.new_chat_button.configure(state="disabled" if busy else "normal")
+        self.export_chat_button.configure(state="disabled" if busy else "normal")
         if self._section == "CHAT":
             self.title.configure(text="Ato is thinking…" if busy else "Conversation")
 

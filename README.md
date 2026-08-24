@@ -23,6 +23,7 @@ The current build provides:
 - Incremental streaming responses in the desktop HUD
 - Cooperative desktop response cancellation with partial-output discard
 - Confirmed desktop New Chat control that retains long-term memory and knowledge
+- HIGH-confirmed, non-overwriting desktop conversation export to inert plain text
 - Guarded desktop knowledge-document import using the existing bounded RAG ingestion engine
 - Themed Knowledge controls for import, refresh, and confirmed index removal
 - Complete themed Memory lifecycle controls, including bounded expiration and permanent forgetting
@@ -327,6 +328,9 @@ While a response is active, **SEND** becomes **STOP**. Stopping closes the respo
 next provider fragment boundary, discards partial output, and does not commit the interrupted turn.
 **NEW CHAT** requires a HIGH-risk confirmation before clearing the active context and persisted
 recent conversation. It deliberately retains Ato's explicit long-term memories and knowledge base.
+**EXPORT** creates one bounded UTF-8 `.txt` transcript inside the workspace through the existing
+audited HIGH-permission file-creation tool. Exports never overwrite an existing file and contain no
+active Markdown, HTML, images, or links.
 Opening Memory presents fixed local actions. Remember, Archive, and Restore require HIGH-risk
 confirmation showing the exact fact and category; Refresh is read-only. Archived memories remain
 stored locally but are excluded from normal retrieval until explicitly restored.

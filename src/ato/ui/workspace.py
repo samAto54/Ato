@@ -47,6 +47,12 @@ class WorkspaceChangeResult:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkspaceCreatedFile:
+    path: str
+    bytes_written: int
+
+
+@dataclass(frozen=True, slots=True)
 class WorkspaceCheckpoint:
     id: int
     path: str
@@ -76,6 +82,18 @@ class DesktopWorkspaceSearch:
 
     registry: ToolRegistry
     reviewed_checkpoints: dict[int, WorkspaceCheckpoint] = field(default_factory=dict, init=False)
+
+    def create_text_file(self, path: str, content: str) -> WorkspaceCreatedFile:
+        raw = self.registry.execute(
+            "create_text_file",
+            {"path": path, "content": content},
+            user_request="Export desktop conversation history",
+        )
+        try:
+            payload = json.loads(raw)
+            return WorkspaceCreatedFile(str(payload["path"]), int(payload["bytes"]))
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise ToolError("Conversation export returned an invalid result.") from exc
 
     def list_files(self, path: str = ".") -> WorkspaceInspectionResult:
         cleaned = path.strip() or "."
