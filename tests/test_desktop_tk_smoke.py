@@ -5,6 +5,7 @@ import pytest
 from ato.brain.agent import Agent
 from ato.brain.messages import Message
 from ato.ui.desktop import AtoDesktop, DesktopChatController
+from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permissions import GuiPermissionBridge
 from ato.ui.state import AtoVisualState
 from ato.ui.themes import ThemeId
@@ -44,6 +45,12 @@ def test_tk_desktop_builds_orb_and_switches_real_state_and_layout() -> None:
     assert desktop.orb.canvas.winfo_manager() == ""
     desktop._toggle_theme()
     assert desktop.orb.canvas.winfo_manager() == "pack"
+
+    selected: list[str] = []
+    palette = WorkspaceActionPalette(desktop.root, desktop.theme, selected.append)
+    desktop.root.update_idletasks()
+    assert palette.window.winfo_exists() == 1
+    palette.close()
     assert bridge.attached is True
     desktop._close()
     assert bridge.attached is False

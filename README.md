@@ -9,6 +9,7 @@ chatbots.
 The current build provides:
 
 - An interactive terminal conversation
+- A themed Workspace command matrix with grouped fixed actions and visible risk levels
 - A local `/help` command covering conversation, memory, knowledge, and voice commands
 - A secret-free `/status` view of local memory, knowledge, tool, and voice availability
 - Local rejection of unknown slash commands with a `/help` hint and no model API request
@@ -318,6 +319,9 @@ read-only Git status, diff, staged diff, 20-entry log, and local branch views; i
 text or flags and caps displayed output at 20,000 characters. It can also parse one Python file
 without execution, run fixed non-fixing Ruff after MEDIUM confirmation, and run fixed pytest after
 HIGH confirmation. Verification output is bounded and failed checks are reported explicitly.
+Selecting Workspace opens a themed command matrix grouped into Files, Git Inspection, Verify, and
+Edit & Recovery. Every action displays its permission level, so no action name or arbitrary command
+must be typed.
 The PREVIEW action validates one exact unique text match and displays a bounded unified diff plus
 original and proposed SHA-256 fingerprints. A complete preview can proceed to a separate HIGH
 confirmation; Ato reuses the exact reviewed values, rejects stale files, writes atomically, and

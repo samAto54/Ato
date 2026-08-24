@@ -25,6 +25,7 @@ from ato.tools.web import fetch_web_page
 from ato.ui.activity import AuditActivityReader
 from ato.ui.chat_format import ChatStyle, format_chat_content
 from ato.ui.orb import AtoOrbCanvas
+from ato.ui.palette import WorkspaceActionPalette
 from ato.ui.permissions import GuiPermissionBridge, GuiPermissionPrompt
 from ato.ui.research import (
     DesktopResearchFetch,
@@ -198,6 +199,7 @@ class AtoDesktop:
         self._section = "CHAT"
         self.state_model = AtoStateModel()
         self._fullscreen = False
+        self._workspace_palette: WorkspaceActionPalette | None = None
         self._research_sources: tuple[ResearchSource, ...] = ()
         self._build()
         self._apply_theme()
@@ -556,6 +558,8 @@ class AtoDesktop:
         )
 
     def _close(self) -> None:
+        if self._workspace_palette is not None:
+            self._workspace_palette.close()
         if self.permission_bridge is not None:
             self.permission_bridge.detach()
         self.root.destroy()
@@ -778,17 +782,13 @@ class AtoDesktop:
     def _start_workspace_search(self) -> None:
         if self._busy or self.controller.workspace_search is None:
             return
+        self._workspace_palette = WorkspaceActionPalette(
+            self.root, self.theme, self._dispatch_workspace_action
+        )
+
+    def _dispatch_workspace_action(self, normalized: str) -> None:
         from tkinter import simpledialog
 
-        action = simpledialog.askstring(
-            "Inspect workspace",
-            "Action: LIST, READ, SEARCH, STATUS, DIFF, STAGED, LOG, BRANCHES, SYNTAX, LINT, or "
-            "TESTS, PREVIEW, CHECKPOINTS, or ROLLBACK",
-            parent=self.root,
-        )
-        if action is None or not action.strip():
-            return
-        normalized = action.strip().casefold()
         if normalized == "checkpoints":
             self._start_checkpoint_listing()
             return
