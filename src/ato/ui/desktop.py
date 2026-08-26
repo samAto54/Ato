@@ -847,7 +847,7 @@ class AtoDesktop:
     def _start_voice_turn(self) -> None:
         if self._busy or self.controller.voice_turn_service is None:
             return
-        from tkinter import simpledialog
+        from tkinter import messagebox, simpledialog
 
         duration = simpledialog.askinteger(
             "Ato voice turn",
@@ -859,6 +859,12 @@ class AtoDesktop:
         )
         if duration is None:
             return
+        stop_on_silence = messagebox.askyesno(
+            "Ato voice turn",
+            "Stop automatically after you speak and Ato detects about one second of silence?\n\n"
+            f"No matter what you choose, recording stops after {duration} seconds.",
+            parent=self.root,
+        )
         self._busy = True
         self.state_model.transition(
             AtoVisualState.TOOL_EXECUTION,
@@ -868,16 +874,25 @@ class AtoDesktop:
         self.microphone_button.configure(state="disabled")
         self.speak_button.configure(state="disabled")
         self.send_button.configure(state="disabled")
-        threading.Thread(target=self._run_voice_turn, args=(duration,), daemon=True).start()
+        threading.Thread(
+            target=self._run_voice_turn,
+            args=(duration, stop_on_silence),
+            daemon=True,
+        ).start()
 
-    def _run_voice_turn(self, duration: int) -> None:
+    def _run_voice_turn(self, duration: int, stop_on_silence: bool = False) -> None:
         assert self.controller.voice_turn_service is not None
         try:
             transcript = self.controller.voice_turn_service.capture(
                 duration,
+                stop_on_silence=stop_on_silence,
                 on_recording=lambda: self.state_model.transition(
                     AtoVisualState.LISTENING,
-                    active_task=f"Recording {duration}-second voice turn",
+                    active_task=(
+                        f"Listening until silence ({duration}-second maximum)"
+                        if stop_on_silence
+                        else f"Recording {duration}-second voice turn"
+                    ),
                     tool="MICROPHONE RECORDING",
                 ),
                 on_audio_level=self.state_model.set_activity,

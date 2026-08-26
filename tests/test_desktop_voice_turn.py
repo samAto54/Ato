@@ -12,9 +12,13 @@ class Recorder:
     def __init__(self, path: Path) -> None:
         self.path = path
         self.durations = []
+        self.auto_stop = []
 
-    def record(self, duration_seconds: int, *, on_level=None) -> Path:
+    def record(
+        self, duration_seconds: int, *, on_level=None, stop_on_silence=False
+    ) -> Path:
         self.durations.append(duration_seconds)
+        self.auto_stop.append(stop_on_silence)
         if on_level is not None:
             on_level(0.65)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,3 +99,13 @@ def test_voice_turn_validates_duration_before_permission(tmp_path, duration) -> 
         service.capture(duration)
     assert recorder.durations == []
     assert requests == []
+
+
+def test_voice_turn_passes_explicit_bounded_auto_stop_choice(tmp_path) -> None:
+    service, recorder, _, requests = build_service(tmp_path, [True, True])
+
+    service.capture(30, stop_on_silence=True)
+
+    assert recorder.durations == [30]
+    assert recorder.auto_stop == [True]
+    assert requests[0].arguments == {"duration_seconds": 30, "stop_on_silence": True}

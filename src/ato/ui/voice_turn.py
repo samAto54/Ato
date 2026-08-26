@@ -34,6 +34,7 @@ class DesktopVoiceTurnService:
         self,
         duration_seconds: int,
         *,
+        stop_on_silence: bool = False,
         on_recording: Callable[[], None] | None = None,
         on_audio_level: Callable[[float], None] | None = None,
         on_transcription_request: Callable[[], None] | None = None,
@@ -44,7 +45,12 @@ class DesktopVoiceTurnService:
         if not 1 <= duration_seconds <= MAX_RECORDING_SECONDS:
             raise ToolError("Recording duration must be between 1 and 120 seconds.")
         self.audit_logger.ensure_ready()
-        record_arguments = {"duration_seconds": duration_seconds}
+        if not isinstance(stop_on_silence, bool):
+            raise ToolError("Voice auto-stop must be enabled or disabled.")
+        record_arguments = {
+            "duration_seconds": duration_seconds,
+            "stop_on_silence": stop_on_silence,
+        }
         record_decision = self.permission_manager.authorize(
             PermissionRequest(
                 "record_microphone",
@@ -65,11 +71,13 @@ class DesktopVoiceTurnService:
         try:
             if on_recording is not None:
                 on_recording()
-            if on_audio_level is None:
+            if on_audio_level is None and not stop_on_silence:
                 recording = self.recorder.record(duration_seconds).resolve()
             else:
                 recording = self.recorder.record(
-                    duration_seconds, on_level=on_audio_level
+                    duration_seconds,
+                    on_level=on_audio_level,
+                    stop_on_silence=stop_on_silence,
                 ).resolve()
             relative_path = self._validate_recording(recording)
         except ToolError as exc:

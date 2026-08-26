@@ -1,5 +1,6 @@
 import json
 import sys
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,6 +76,7 @@ def test_sounddevice_recorder_reports_normalized_transient_levels(tmp_path, monk
         rec=lambda *args, **kwargs: samples,
         sleep=lambda milliseconds: None,
         wait=lambda: None,
+        stop=lambda: None,
     )
     monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
     levels = []
@@ -84,3 +86,23 @@ def test_sounddevice_recorder_reports_normalized_transient_levels(tmp_path, monk
     assert path.is_file()
     assert levels[:-1] == pytest.approx([1.0] * 20, abs=0.01)
     assert levels[-1] == 0.0
+
+
+def test_sounddevice_recorder_can_stop_after_speech_then_silence(tmp_path, monkeypatch) -> None:
+    samples = np.zeros((SAMPLE_RATE * 5, 1), dtype=np.int16)
+    samples[: SAMPLE_RATE // 2] = 6_000
+    stopped = []
+    fake_sounddevice = SimpleNamespace(
+        rec=lambda *args, **kwargs: samples,
+        sleep=lambda milliseconds: None,
+        wait=lambda: None,
+        stop=lambda: stopped.append(True),
+    )
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sounddevice)
+
+    path = SoundDeviceRecorder(tmp_path).record(5, stop_on_silence=True)
+
+    with wave.open(str(path), "rb") as recording:
+        recorded_seconds = recording.getnframes() / recording.getframerate()
+    assert stopped == [True]
+    assert 1.5 <= recorded_seconds < 2.0
