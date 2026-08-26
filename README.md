@@ -449,6 +449,9 @@ the reply is represented by a hash and character count in the audit log, and pla
 automatic. When both `ATO_VOICE_ENABLED=true` and `ATO_STT_MODEL_PATH` point to an existing local
 faster-whisper model, **VOICE TURN** records one explicitly timed clip after CRITICAL confirmation,
 requests HIGH confirmation for offline transcription, and places the transcript in the composer.
+The desktop can optionally stop that approved recording after speech followed by about 1.1 seconds
+of locally measured silence. The duration entered by the user remains a hard maximum, silence
+detection starts only after speech is detected, and the transcript still requires manual review.
 The user must review, edit, and manually send it; Ato never listens in the background or submits a
 transcript automatically. All other desktop tools remain locked. The right HUD
 shows the active task, locked tool channel, and privacy-reduced local OS/CPU/RAM data; network status
