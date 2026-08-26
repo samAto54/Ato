@@ -958,6 +958,7 @@ class AtoDesktop:
                     active_task="Playing latest reply",
                     tool="OFFLINE WINDOWS SPEECH",
                 ),
+                on_audio_level=self.state_model.set_activity,
             )
         except AtoError as exc:
             self.root.after(0, self._finish_speech, str(exc))

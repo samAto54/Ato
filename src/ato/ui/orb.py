@@ -87,6 +87,8 @@ class AtoOrbCanvas:
         self._started = time.monotonic()
         self._last_frame = self._started
         self._motion = motion_profile(visual_profile(AtoVisualState.IDLE))
+        self._activity_revision = -1
+        self._reactive_activity = 0.0
         self._running = True
         self.canvas.bind("<Destroy>", self._stop)
         self._animate()
@@ -121,11 +123,16 @@ class AtoOrbCanvas:
         easing = 1.0 - math.exp(-frame_time * 5.5)
         self._motion = blend_motion(self._motion, target, easing)
         profile = self._motion
+        if snapshot.revision != self._activity_revision:
+            self._activity_revision = snapshot.revision
+            self._reactive_activity = snapshot.activity
+        else:
+            self._reactive_activity *= math.exp(-frame_time * 3.8)
         width = max(canvas.winfo_width(), 500)
         height = max(canvas.winfo_height(), 300)
         cx, cy = width / 2, height / 2 - 4
         base = min(width, height) * 0.205
-        reactive_energy = snapshot.activity * profile.waveform
+        reactive_energy = self._reactive_activity * profile.waveform
         pulse = 1 + math.sin(elapsed * (2.2 + profile.speed)) * profile.pulse
         pulse += reactive_energy * 0.1
         radius = base * pulse
@@ -139,7 +146,7 @@ class AtoOrbCanvas:
         self._draw_energy_lattice(cx, cy, radius, elapsed, profile)
         self._draw_core(cx, cy, radius, elapsed, profile)
         if profile.waveform > 0.01:
-            self._draw_waveform(cx, cy, radius, elapsed, profile, snapshot.activity)
+            self._draw_waveform(cx, cy, radius, elapsed, profile, self._reactive_activity)
         if profile.scan > 0.01:
             self._draw_scan(cx, cy, radius, elapsed, profile.scan)
         canvas.create_text(
