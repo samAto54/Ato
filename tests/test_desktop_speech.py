@@ -11,8 +11,10 @@ class Player:
     def __init__(self) -> None:
         self.texts = []
 
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, *, on_level=None) -> None:
         self.texts.append(text)
+        if on_level is not None:
+            on_level(0.8)
 
 
 def test_desktop_speech_denies_without_playback_and_audits(tmp_path) -> None:
@@ -51,3 +53,14 @@ def test_desktop_speech_rejects_unbounded_text_before_permission(tmp_path) -> No
     with pytest.raises(AtoError, match="1-4,000"):
         service.speak("x" * 4_001)
     assert confirmations == []
+
+
+def test_desktop_speech_forwards_private_activity_only_after_approval(tmp_path) -> None:
+    levels = []
+    service = DesktopSpeechService(
+        Player(), PermissionManager(lambda request: True), AuditLogger(tmp_path / "audit.jsonl")
+    )
+
+    service.speak("hello", on_audio_level=levels.append)
+
+    assert levels == [0.8]

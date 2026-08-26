@@ -424,6 +424,9 @@ ramp naturally as the backend moves between idle, listening, processing, tool, a
 During an approved microphone recording, locally measured audio energy feeds a normalized,
 thread-safe activity channel that expands the core and waveform in real time. Audio levels are
 transient visual data only: they are neither retained nor written to the audit log.
+Approved Windows speech playback also uses local word-progress events to pulse the speaking
+waveform in cadence with Ato's voice. Only normalized levels cross the UI boundary; spoken words
+are not emitted as visual telemetry, and the signal decays smoothly between progress events.
 
 The thread-safe visual model defines these real backend states:
 

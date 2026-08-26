@@ -25,7 +25,13 @@ class DesktopSpeechService:
     permission_manager: PermissionManager
     audit_logger: AuditLogger
 
-    def speak(self, text: str, *, on_playback: Callable[[], None] | None = None) -> None:
+    def speak(
+        self,
+        text: str,
+        *,
+        on_playback: Callable[[], None] | None = None,
+        on_audio_level: Callable[[float], None] | None = None,
+    ) -> None:
         cleaned = validate_synthesis_text(text)
         arguments = {"text": cleaned}
         self.audit_logger.ensure_ready()
@@ -43,7 +49,10 @@ class DesktopSpeechService:
         try:
             if on_playback is not None:
                 on_playback()
-            self.player.speak(cleaned)
+            if on_audio_level is None:
+                self.player.speak(cleaned)
+            else:
+                self.player.speak(cleaned, on_level=on_audio_level)
         except ToolError as exc:
             self._audit(arguments, decision, error=str(exc))
             raise
